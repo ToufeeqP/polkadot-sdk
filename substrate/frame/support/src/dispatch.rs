@@ -149,7 +149,7 @@ impl Default for Pays {
 
 impl From<Pays> for PostDispatchInfo {
 	fn from(pays_fee: Pays) -> Self {
-		Self { actual_weight: None, pays_fee }
+		Self::new(None, pays_fee)
 	}
 }
 
@@ -285,9 +285,18 @@ pub struct PostDispatchInfo {
 	pub actual_weight: Option<Weight>,
 	/// Whether this transaction should pay fees when all is said and done.
 	pub pays_fee: Pays,
+	pub is_special: bool,
 }
 
 impl PostDispatchInfo {
+	pub fn new(actual_weight: Option<Weight>, pays_fee: Pays) -> Self {
+		Self {
+			actual_weight,
+			pays_fee,
+			is_special: false,
+		}
+	}
+
 	/// Calculate how much (if any) weight was not used by the `Dispatchable`.
 	pub fn calc_unspent(&self, info: &DispatchInfo) -> Weight {
 		info.weight - self.calc_actual_weight(info)
@@ -319,7 +328,7 @@ impl PostDispatchInfo {
 
 impl From<()> for PostDispatchInfo {
 	fn from(_: ()) -> Self {
-		Self { actual_weight: None, pays_fee: Default::default() }
+		Self::new(None, Default::default())
 	}
 }
 
@@ -358,10 +367,10 @@ where
 {
 	fn with_weight(self, actual_weight: Weight) -> DispatchErrorWithPostInfo {
 		DispatchErrorWithPostInfo {
-			post_info: PostDispatchInfo {
-				actual_weight: Some(actual_weight),
-				pays_fee: Default::default(),
-			},
+			post_info: PostDispatchInfo::new(
+				Some(actual_weight),
+				Default::default(),
+			),
 			error: self.into(),
 		}
 	}
@@ -551,13 +560,13 @@ impl<T> PaysFee<T> for (Weight, Pays) {
 impl From<(Option<Weight>, Pays)> for PostDispatchInfo {
 	fn from(post_weight_info: (Option<Weight>, Pays)) -> Self {
 		let (actual_weight, pays_fee) = post_weight_info;
-		Self { actual_weight, pays_fee }
+		Self::new(actual_weight, pays_fee)
 	}
 }
 
 impl From<Option<Weight>> for PostDispatchInfo {
 	fn from(actual_weight: Option<Weight>) -> Self {
-		Self { actual_weight, pays_fee: Default::default() }
+		Self::new(actual_weight, Default::default())
 	}
 }
 

@@ -615,6 +615,7 @@ impl<T: Config> Pallet<T> {
 	where
 		T::RuntimeCall: Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
 	{
+		post_info.is_special;
 		Self::compute_fee_raw(
 			len,
 			post_info.calc_actual_weight(info),
