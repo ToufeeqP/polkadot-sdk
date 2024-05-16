@@ -153,7 +153,7 @@ pub mod pallet {
 		/// It checks that the _origin_ for this call is _Signed_ and returns a dispatch
 		/// error if it isn't. Learn more about origins here: <https://docs.substrate.io/build/origins/>
 		#[pallet::call_index(0)]
-		#[pallet::weight(T::WeightInfo::do_something())]
+		#[pallet::weight((T::WeightInfo::do_something(), true))]
 		pub fn do_something(origin: OriginFor<T>, something: u32) -> DispatchResult {
 			// Check that the extrinsic was signed and get the signer.
 			let who = ensure_signed(origin)?;
@@ -199,6 +199,22 @@ pub mod pallet {
 					Ok(())
 				},
 			}
+		}
+
+		#[pallet::call_index(2)]
+		#[pallet::weight(T::WeightInfo::do_something())]
+		pub fn do_something2(origin: OriginFor<T>, something: u32) -> DispatchResult {
+			// Check that the extrinsic was signed and get the signer.
+			let who = ensure_signed(origin)?;
+
+			// Update storage.
+			Something::<T>::put(something);
+
+			// Emit an event.
+			Self::deposit_event(Event::SomethingStored { something, who });
+
+			// Return a successful `DispatchResult`
+			Ok(())
 		}
 	}
 }
