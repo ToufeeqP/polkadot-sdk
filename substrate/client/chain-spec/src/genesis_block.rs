@@ -27,6 +27,10 @@ use sp_runtime::{
 	traits::{Block as BlockT, Hash as HashT, Header as HeaderT, Zero},
 	BuildStorage,
 };
+use sp_runtime::OpaqueExtrinsic;
+use codec::{Encode, Decode};
+use hex_literal::hex;
+
 
 /// Return the state version given the genesis storage and executor.
 pub fn resolve_state_version_from_wasm<E>(
@@ -65,10 +69,21 @@ pub fn construct_genesis_block<Block: BlockT>(
 	state_root: Block::Hash,
 	state_version: StateVersion,
 ) -> Block {
-	let extrinsics_root = <<<Block as BlockT>::Header as HeaderT>::Hashing as HashT>::trie_root(
-		Vec::new(),
-		state_version,
-	);
+	// genesis remark ext
+	let remark_ext = hex!("29028400d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d01e2113598ae9146dc85c3a00bc90a04a0f2d983f9f35d152625402217ae20e81004a493ed643376a7889520708a8b4f2c26998f68b46c9c197e67fe9b69b5f3870500000000008054686973206973207468652067656e65736973207472616e73616374696f6e21");
+	// genesis DA ext
+	// let da_ext = hex!("35028400d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d0174c212c20e7361c7034fc263b309e6107ae6538dc86c348e52f34acb524f7765a3a0a7c3a41b6aad7f300596866ae1b1c036ea2f10570b59e8a206b58042748104000000001d018854686973206973207468652067656e65736973204441207472616e73616374696f6e");
+
+	// Add extrinsic to the genesis storage
+	let extrinsics: Vec<OpaqueExtrinsic> = vec![OpaqueExtrinsic::from_bytes(&remark_ext).expect("We know what we're doing!")];
+	let extrinsics_bytes = extrinsics.encode();
+	let extrinsics: Vec<Block::Extrinsic> = Decode::decode(&mut &extrinsics_bytes[..]).unwrap_or_default();
+
+	let extrinsics_root =
+		<<<Block as BlockT>::Header as HeaderT>::Hashing as HashT>::ordered_trie_root(
+			extrinsics.iter().map(Encode::encode).collect(),
+			state_version,
+		);
 
 	Block::new(
 		<<Block as BlockT>::Header as HeaderT>::new(
@@ -78,7 +93,7 @@ pub fn construct_genesis_block<Block: BlockT>(
 			Default::default(),
 			Default::default(),
 		),
-		Default::default(),
+		extrinsics,
 	)
 }
 
