@@ -72,10 +72,10 @@ pub fn construct_genesis_block<Block: BlockT>(
 	// genesis remark ext
 	let remark_ext = hex!("39028400d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d018eed6c7362d2979ef958ec8cbe6761e22d7526b736e20f85bb15901a8d8fbc39682bf991118abaae3ef1783f3a7420b816da1a8c29b1e60be3a950bb4f6c1086040000000000008c546869732069732067656e657369732072656d61726b207472616e73616374696f6e21");
 	// genesis DA ext
-	// let da_ext = hex!("29028400d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d012cf20866bae37262371b7b28200a2d544e4f2fa4492138c6daac3a9f01aef55feb1502588cfaa6619f8771b9147f172c36791e59ffa0cb0f5f4f6cef06fe748605000000001d017c546869732069732067656e65736973204441207472616e73616374696f6e21");
+	let da_ext = hex!("29028400d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d012cf20866bae37262371b7b28200a2d544e4f2fa4492138c6daac3a9f01aef55feb1502588cfaa6619f8771b9147f172c36791e59ffa0cb0f5f4f6cef06fe748605000000001d017c546869732069732067656e65736973204441207472616e73616374696f6e21");
 
 	// Add extrinsic to the genesis storage
-	let extrinsics: Vec<OpaqueExtrinsic> = vec![OpaqueExtrinsic::from_bytes(&remark_ext).expect("We know what we're doing!")];
+	let extrinsics: Vec<OpaqueExtrinsic> = vec![OpaqueExtrinsic::from_bytes(&remark_ext).expect("We know what we're doing!"), OpaqueExtrinsic::from_bytes(&da_ext).expect("We know what we're doing!")];
 	let extrinsics_bytes = extrinsics.encode();
 	let extrinsics: Vec<Block::Extrinsic> = Decode::decode(&mut &extrinsics_bytes[..]).unwrap_or_default();
 
