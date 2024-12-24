@@ -205,16 +205,20 @@ pub trait SimpleSlotWorker<B: BlockT> {
 			target: log_target,
 			"Applying header-cut-off",
 		);
-		let HEADER_CUT_OFF = Duration::from_secs(5);
-		let deadline = if proposing_remaining_duration > HEADER_CUT_OFF {
+		let header_cut_off = Duration::from_secs(5);
+		let deadline = if proposing_remaining_duration > header_cut_off {
 			info!(
 				target: log_target,
 				"Applied header-cut-off!",
 			);
-			(proposing_remaining_duration - HEADER_CUT_OFF).mul_f32(0.98)
+			(proposing_remaining_duration - header_cut_off).mul_f32(0.98)
 		} else {
 			proposing_remaining_duration.mul_f32(0.98)
 		};
+		info!(
+			target: log_target,
+			"proposing_remaining_duration: {:?}, deadline: {:?}", proposing_remaining_duration, deadline
+		);
 		// deadline our production to 98% of the total time left for proposing. As we deadline
 		// the proposing below to the same total time left, the 2% margin should be enough for
 		// the result to be returned.
@@ -260,7 +264,10 @@ pub trait SimpleSlotWorker<B: BlockT> {
 				return None;
 			},
 		};
-
+		info!(
+			target: log_target,
+			"propose return: {:?}", Instant::now()
+		);
 		Some(proposal)
 	}
 
@@ -308,6 +315,10 @@ pub trait SimpleSlotWorker<B: BlockT> {
 	where
 		Self: Sync,
 	{
+		info!(
+			target: LOG_TARGET,
+			"on_slot: {:?}", Instant::now()
+		);
 		let slot = slot_info.slot;
 		let telemetry = self.telemetry();
 		let logging_target = self.logging_target();
@@ -465,6 +476,10 @@ pub trait SimpleSlotWorker<B: BlockT> {
 				);
 			},
 		}
+		info!(
+			target: LOG_TARGET,
+			"on_slot import_complete: {:?}", Instant::now()
+		);
 		let end_import_timestamp = BlockMetrics::get_current_timestamp_in_ms_or_default();
 
 		let block_number: u64 = header_num.try_into().unwrap_or_default();
@@ -481,7 +496,10 @@ pub trait SimpleSlotWorker<B: BlockT> {
 		};
 		BlockMetrics::observe_interval(block_number, block_hash.clone(), proposal_interval.into());
 		BlockMetrics::observe_interval(block_number, block_hash, import_interval.into());
-
+		info!(
+			target: LOG_TARGET,
+			"on_slot end: {:?}", Instant::now()
+		);
 		Some(SlotResult { block: B::new(header, body), storage_proof })
 	}
 }
