@@ -104,6 +104,23 @@ where
 		})
 	}
 
+	async fn submit_ready_extrinsic(&self, ext: Bytes) -> Result<TxHash<P>> {
+		let xt = match Decode::decode(&mut &ext[..]) {
+			Ok(xt) => xt,
+			Err(err) => return Err(Error::Client(Box::new(err)).into()),
+		};
+
+		let best_block_hash = self.client.info().best_hash;
+
+		// Directly insert into the ready pool (bypasses validation)
+		self.pool.insert_ready_transaction(best_block_hash, TransactionSource::Local, xt).map_err(|e| {
+			e.into_pool_error()
+				.map(|e| Error::Pool(e))
+				.unwrap_or_else(|e| Error::Verification(Box::new(e)))
+				.into()
+		})
+	}
+
 	fn insert_key(&self, key_type: String, suri: String, public: Bytes) -> Result<()> {
 		self.deny_unsafe.check_if_safe()?;
 

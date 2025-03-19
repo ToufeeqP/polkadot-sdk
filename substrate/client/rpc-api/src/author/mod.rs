@@ -76,4 +76,8 @@ pub trait AuthorApi<Hash, BlockHash> {
 		item = TransactionStatus<Hash, BlockHash>,
 	)]
 	fn watch_extrinsic(&self, bytes: Bytes);
+
+	/// Submit hex-encoded extrinsic for inclusion in block bypassing the tx pool validation.
+	#[method(name = "author_submitReadyExtrinsic")]
+	async fn submit_ready_extrinsic(&self, extrinsic: Bytes) -> Result<Hash, Error>;
 }

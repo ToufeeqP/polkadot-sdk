@@ -33,6 +33,7 @@ mod tests;
 
 pub use crate::api::FullChainApi;
 use async_trait::async_trait;
+use byte_slice_cast::AsByteSlice;
 use enactment_state::{EnactmentAction, EnactmentState};
 use futures::{
 	channel::oneshot,
@@ -51,9 +52,7 @@ use std::{
 
 use graph::{ExtrinsicHash, IsValidator};
 use sc_transaction_pool_api::{
-	error::Error as TxPoolError, ChainEvent, ImportNotificationStream, MaintainedTransactionPool,
-	PoolFuture, PoolStatus, ReadyTransactions, TransactionFor, TransactionPool, TransactionSource,
-	TransactionStatusStreamFor, TxHash,
+	error::Error as TxPoolError, ChainEvent, ImportNotificationStream, MaintainedTransactionPool, PoolFuture, PoolStatus, ReadyTransactions, TransactionFor, TransactionPool, TransactionPriority, TransactionSource, TransactionStatusStreamFor, TxHash
 };
 use sp_core::traits::SpawnEssentialNamed;
 use sp_runtime::{
@@ -283,6 +282,35 @@ where
 		self.metrics.report(|metrics| metrics.submitted_transactions.inc());
 
 		async move { pool.submit_one(at, source, xt).await }.boxed()
+	}
+
+	fn insert_ready_transaction(
+		&self,
+		_at: <Self::Block as BlockT>::Hash,
+		_source: TransactionSource,
+		xt: TransactionFor<Self>,
+	) -> Result<TxHash<Self>, Self::Error> {
+		let pool = self.pool.clone();
+
+		self.metrics.report(|metrics| metrics.submitted_transactions.inc());
+
+		let (hash, bytes) = self.api().hash_and_length(&xt);
+
+		let ready_tx = Transaction {
+            hash,
+            data: xt.clone(),
+			bytes,
+            source: TransactionSource::Local, // Mark as Local
+            valid_till: Default::default(),  // Default longevity
+            priority: TransactionPriority::MAX, // Max priority
+            requires: Vec::new(),
+            provides: vec![hash.as_byte_slice().to_vec() ], // Uniqueness in the pool
+            propagate: false,
+        };
+		let validated_tx = ValidatedTransaction::Valid(ready_tx);
+		pool.validated_pool().submit(vec![validated_tx].into_iter());
+
+		Ok(hash)
 	}
 
 	fn submit_and_watch(

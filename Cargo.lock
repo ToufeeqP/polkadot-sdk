@@ -16742,6 +16742,7 @@ dependencies = [
  "array-bytes 6.1.0",
  "assert_matches",
  "async-trait",
+ "byte-slice-cast",
  "criterion 0.4.0",
  "futures",
  "futures-timer",

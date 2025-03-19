@@ -212,6 +212,14 @@ pub trait TransactionPool: Send + Sync {
 		xt: TransactionFor<Self>,
 	) -> PoolFuture<TxHash<Self>, Self::Error>;
 
+	/// Returns a future that imports one unverified transaction to the pool.
+	fn insert_ready_transaction(
+		&self,
+		at: <Self::Block as BlockT>::Hash,
+		source: TransactionSource,
+		xt: TransactionFor<Self>,
+	) -> Result<TxHash<Self>, Self::Error>;
+
 	/// Returns a future that import a single transaction and starts to watch their progress in the
 	/// pool.
 	fn submit_and_watch(
