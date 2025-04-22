@@ -63,7 +63,7 @@ pub type Transactions<E> = Vec<E>;
 
 /// A transaction handler messages
 #[derive(Debug, Clone, Encode, Decode)]
-pub enum TransactionsMessage<E, H: ExHashT> {
+pub enum TransactionMessage<E, H: ExHashT> {
 	/// A list of full transactions
 	#[codec(index = 0)]
 	Transactions(Vec<E>),
@@ -305,7 +305,7 @@ where
 	H: ExHashT,
 	N: NetworkPeers + NetworkEventStream + NetworkNotification,
 	S: SyncEventStream + sp_consensus::SyncOracle,
-	TransactionsMessage<B::Extrinsic, H>: Encode + Decode,
+	TransactionMessage<B::Extrinsic, H>: Encode + Decode,
 {
 	/// Turns the [`TransactionsHandler`] into a future that should run forever and not be
 	/// interrupted.
@@ -395,24 +395,24 @@ where
 				// } else {
 				// 	warn!(target: "sub-libp2p", "Failed to decode transactions list");
 				// }
-				// Decode the incoming message to TransactionsMessage type & handle each type
+				// Decode the incoming message to TransactionMessage type & handle each type
 				// For now, not handling the existing message types
 				if let Ok(message) =
-					TransactionsMessage::<B::Extrinsic, H>::decode(&mut notification.as_ref())
+					TransactionMessage::<B::Extrinsic, H>::decode(&mut notification.as_ref())
 				{
 					match message {
-						TransactionsMessage::Transactions(transactions) => {
+						TransactionMessage::Transactions(transactions) => {
 							self.on_transactions(peer, transactions);
 						},
-						TransactionsMessage::TransactionAnnouncement(summaries) => {
+						TransactionMessage::TransactionAnnouncement(summaries) => {
 							self.handle_announcement(peer, summaries);
 						},
-						TransactionsMessage::TransactionRequest(hashes) => {
+						TransactionMessage::TransactionRequest(hashes) => {
 							self.handle_request(peer, hashes);
 						},
 					}
 				} else {
-					warn!(target: "sub-libp2p", "Failed to decode TransactionsMessage");
+					warn!(target: "sub-libp2p", "Failed to decode TransactionMessage");
 				}
 			},
 		}
@@ -504,7 +504,7 @@ where
 		if !hashes.is_empty() {
 			self.notification_service.send_sync_notification(
 				&peer,
-				TransactionsMessage::TransactionRequest(hashes).encode(),
+				TransactionMessage::TransactionRequest(hashes).encode(),
 			);
 		}
 	}
@@ -522,7 +522,7 @@ where
 		if !transactions.is_empty() {
 			self.notification_service.send_sync_notification(
 				&peer,
-				TransactionsMessage::Transactions(transactions).encode(),
+				TransactionMessage::Transactions(transactions).encode(),
 			);
 		}
 	}
@@ -633,8 +633,8 @@ where
 				}
 
 				// Encoding the enum requires full type resolution for generics
-				let msg: TransactionsMessage<B::Extrinsic, H> =
-					TransactionsMessage::TransactionAnnouncement(announcements);
+				let msg: TransactionMessage<B::Extrinsic, H> =
+					TransactionMessage::TransactionAnnouncement(announcements);
 				self.notification_service.send_sync_notification(who, msg.encode());
 			}
 		}
