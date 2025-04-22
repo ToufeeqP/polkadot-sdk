@@ -22,6 +22,7 @@ futures = "0.3.21"
 libp2p = "0.51.4"
 log = "0.4.17"
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", path = "../../../utils/prometheus" }
+sc-consensus = { path = "../../consensus/common" }
 sc-network = { path = ".." }
 sc-network-common = { path = "../common" }
 sc-network-sync = { path = "../sync" }

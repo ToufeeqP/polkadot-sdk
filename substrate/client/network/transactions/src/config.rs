@@ -27,6 +27,9 @@ use std::{collections::HashMap, future::Future, pin::Pin, time};
 /// Interval at which we propagate transactions;
 pub(crate) const PROPAGATE_TIMEOUT: time::Duration = time::Duration::from_millis(2900);
 
+/// Number of slots to check if the node is going to author a to decide whether to request transactions or not.
+pub(crate) const SLOTS_TO_CHECK: u64 = 2;
+
 /// Maximum number of known transaction hashes to keep for a peer.
 ///
 /// This should be approx. 2 blocks full of transactions for the network to function properly.

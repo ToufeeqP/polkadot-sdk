@@ -36,6 +36,8 @@ use sc_client_api::{
 };
 use sc_client_db::{Backend, DatabaseSettings};
 use sc_consensus::import_queue::ImportQueue;
+use sc_consensus_babe::slot_author_discovery::BabeAuthorityDiscovery;
+use sp_consensus_babe::BabeApi;
 use sc_executor::{
 	sp_wasm_interface::HostFunctions, HeapAllocStrategy, NativeElseWasmExecutor,
 	NativeExecutionDispatch, RuntimeVersionOf, WasmExecutor, DEFAULT_HEAP_ALLOC_STRATEGY,
@@ -769,6 +771,8 @@ where
 		+ HeaderBackend<TBl>
 		+ BlockchainEvents<TBl>
 		+ 'static,
+	// TODO: Refactor to avoid this bound.
+	<TCl as ProvideRuntimeApi<TBl>>::Api: BabeApi<TBl>,
 	TExPool: TransactionPool<Block = TBl, Hash = <TBl as BlockT>::Hash> + 'static,
 	TImpQu: ImportQueue<TBl> + 'static,
 {
@@ -951,11 +955,19 @@ where
 	let has_bootnodes = !network_params.network_config.network_config.boot_nodes.is_empty();
 	let network_mut = sc_network::NetworkWorker::new(network_params)?;
 	let network = network_mut.service().clone();
+	let keystore_container = KeystoreContainer::new(&config.keystore)?;
+	let keystore = keystore_container.local_keystore();
+	// TODO: Fix this, we should not directly wire babe like this
+	let babe_authority_discovery = Arc::new(BabeAuthorityDiscovery::new(
+		client.clone(),
+		keystore,
+	));
 
 	let (tx_handler, tx_handler_controller) = transactions_handler_proto.build(
 		network.clone(),
 		sync_service.clone(),
 		Arc::new(TransactionPoolAdapter { pool: transaction_pool, client: client.clone() }),
+		babe_authority_discovery,
 		config.prometheus_config.as_ref().map(|config| &config.registry),
 	)?;
 	spawn_handle.spawn("network-transactions-handler", Some("networking"), tx_handler.run());

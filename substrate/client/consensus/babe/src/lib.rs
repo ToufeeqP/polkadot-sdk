@@ -145,6 +145,7 @@ mod verification;
 
 pub mod authorship;
 pub mod aux_schema;
+pub mod slot_author_discovery;
 #[cfg(test)]
 mod tests;
 
@@ -1933,4 +1934,53 @@ where
 	aux_schema::write_epoch_changes::<Block, _, _>(&epoch_changes, |values| {
 		client.insert_aux(values, weight_keys.iter())
 	})
+}
+
+/// Get the current slot from the client
+fn get_current_slot<B, C>(client: &Arc<C>) -> Option<Slot>
+where
+    B: BlockT,
+    C: HeaderBackend<B>,
+{
+    let best_header = client.header(client.info().best_hash).ok()??;
+
+    best_header.digest().convert_first(|item| {
+        item.as_babe_pre_digest().map(|d| d.slot())
+    })
+}
+
+/// Check if this client can author the block in the next `n` slots.
+fn will_author_in_next_slots<B, C>(
+    client: &Arc<C>,
+    keystore: KeystorePtr,
+    n: u64,
+) -> ClientResult<bool>
+where
+    B: BlockT,
+    C: ProvideRuntimeApi<B> + HeaderBackend<B> + Send + Sync + 'static,
+    C::Api: BabeApi<B>,
+{
+    let public_keys = keystore.sr25519_public_keys(AuthorityId::ID);
+    if public_keys.is_empty() {
+        return Ok(false);
+    }
+
+    let best_hash = client.info().best_hash;
+
+    let current_slot = get_current_slot::<B, C>(client).ok_or_else(|| {
+        ClientError::Backend("Failed to get current slot from the client".to_string())
+    })?;
+
+    let current_epoch = client.runtime_api().current_epoch(best_hash).map_err(|_e| {
+        ClientError::Backend("Failed to get current epoch from the client".to_string())
+    })?;
+
+    for offset in 1..n {
+        let slot = current_slot + offset;
+
+        if authorship::claim_slot(slot, &Epoch(current_epoch.clone()), &keystore).is_some() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }

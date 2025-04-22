@@ -34,6 +34,7 @@ use libp2p::{multiaddr, PeerId};
 use log::{debug, trace, warn};
 
 use prometheus_endpoint::{register, Counter, PrometheusError, Registry, U64};
+use sc_consensus::authority_discovery::AuthorityDiscoveryForTxPool;
 use sc_network::{
 	config::{NonDefaultSetConfig, NonReservedPeerMode, ProtocolId, SetConfig},
 	error,
@@ -178,13 +179,15 @@ impl TransactionsHandlerPrototype {
 		H: ExHashT,
 		N: NetworkPeers + NetworkEventStream + NetworkNotification,
 		S: SyncEventStream + sp_consensus::SyncOracle,
+		AD: AuthorityDiscoveryForTxPool,
 	>(
 		self,
 		network: N,
 		sync: S,
 		transaction_pool: Arc<dyn TransactionPool<H, B>>,
+		authority_discovery: Arc<AD>,
 		metrics_registry: Option<&Registry>,
-	) -> error::Result<(TransactionsHandler<B, H, N, S>, TransactionsHandlerController<H>)> {
+	) -> error::Result<(TransactionsHandler<B, H, N, S, AD>, TransactionsHandlerController<H>)> {
 		let sync_event_stream = sync.event_stream("transactions-handler-sync");
 		let (to_handler, from_controller) = tracing_unbounded("mpsc_transactions_handler", 100_000);
 
@@ -207,6 +210,7 @@ impl TransactionsHandlerPrototype {
 			} else {
 				None
 			},
+			authority_discovery,
 		};
 
 		let controller = TransactionsHandlerController { to_handler };
@@ -264,6 +268,7 @@ pub struct TransactionsHandler<
 	H: ExHashT,
 	N: NetworkPeers + NetworkEventStream + NetworkNotification,
 	S: SyncEventStream + sp_consensus::SyncOracle,
+	AD: AuthorityDiscoveryForTxPool,
 > {
 	protocol_name: ProtocolName,
 	/// Interval at which we call `propagate_transactions`.
@@ -289,6 +294,8 @@ pub struct TransactionsHandler<
 	metrics: Option<Metrics>,
 	/// Handle that is used to communicate with `sc_network::Notifications`.
 	notification_service: Box<dyn NotificationService>,
+	/// Authority discovery.
+	authority_discovery: Arc<AD>,
 }
 
 /// Peer information
@@ -299,12 +306,13 @@ struct Peer<H: ExHashT> {
 	role: ObservedRole,
 }
 
-impl<B, H, N, S> TransactionsHandler<B, H, N, S>
+impl<B, H, N, S, AD> TransactionsHandler<B, H, N, S, AD>
 where
 	B: BlockT + 'static,
 	H: ExHashT,
 	N: NetworkPeers + NetworkEventStream + NetworkNotification,
 	S: SyncEventStream + sp_consensus::SyncOracle,
+	AD: AuthorityDiscoveryForTxPool,
 	TransactionMessage<B::Extrinsic, H>: Encode + Decode,
 {
 	/// Turns the [`TransactionsHandler`] into a future that should run forever and not be
@@ -499,9 +507,9 @@ where
 			.map(|s| s.hash.clone())
 			.collect();
 
-		// TODO: we should have a sophisticated logic here to determine if this node need these txs
-		// or not, for now we will check only if they exist in our pool or not
-		if !hashes.is_empty() {
+		// TODO: we can have a more sophisticated logic here to determine if this client need these txs
+		// or not, for now we're only checking if they exist in client's pool or not & if client is authoring the blocks in near future
+		if !hashes.is_empty() && self.authority_discovery.will_author_in_next_slots(SLOTS_TO_CHECK){
 			self.notification_service.send_sync_notification(
 				&peer,
 				TransactionMessage::TransactionRequest(hashes).encode(),

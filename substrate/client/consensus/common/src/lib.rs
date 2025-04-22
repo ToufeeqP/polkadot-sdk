@@ -36,4 +36,6 @@ mod longest_chain;
 
 pub mod shared_data;
 
+pub mod authority_discovery;
+
 pub use longest_chain::LongestChain;

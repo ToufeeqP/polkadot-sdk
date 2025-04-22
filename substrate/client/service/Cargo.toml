@@ -52,6 +52,8 @@ sp-session = { path = "../../primitives/session" }
 sp-state-machine = { path = "../../primitives/state-machine" }
 sp-consensus = { path = "../../primitives/consensus/common" }
 sc-consensus = { path = "../consensus/common" }
+sp-consensus-babe = { path = "../../primitives/consensus/babe" }
+sc-consensus-babe = { path = "../consensus/babe" }
 sp-storage = { path = "../../primitives/storage" }
 sc-network = { path = "../network" }
 sc-network-bitswap = { path = "../network/bitswap" }
