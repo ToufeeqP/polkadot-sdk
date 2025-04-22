@@ -26,7 +26,10 @@ use codec::Codec;
 use futures::{Future, Stream};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sp_core::offchain::TransactionPoolExt;
-use sp_runtime::traits::{Block as BlockT, Member, NumberFor};
+use sp_runtime::{
+	traits::{Block as BlockT, Member, NumberFor},
+	transaction_validity::TransactionSummary,
+};
 use std::{collections::HashMap, hash::Hash, marker::PhantomData, pin::Pin, sync::Arc};
 
 const LOG_TARGET: &str = "txpool::api";
@@ -178,6 +181,8 @@ pub trait InPoolTransaction {
 	fn provides(&self) -> &[TransactionTag];
 	/// Return a flag indicating if the transaction should be propagated to other peers.
 	fn is_propagable(&self) -> bool;
+	/// Get the transaction summary.
+	fn summary(&self) -> TransactionSummary<Self::Hash>;
 }
 
 /// Transaction pool interface.
@@ -442,7 +447,7 @@ impl<Block: BlockT> sp_core::offchain::TransactionPool for OffchainTransactionPo
 					"Failed to decode extrinsic in `OffchainTransactionPool::submit_transaction`: {e:?}"
 				);
 
-				return Err(())
+				return Err(());
 			},
 		};
 

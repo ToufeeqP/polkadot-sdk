@@ -546,7 +546,8 @@ async fn transaction_notifications<Block, ExPool>(
 	transaction_pool
 		.import_notification_stream()
 		.for_each(move |hash| {
-			tx_handler_controller.propagate_transaction(hash);
+			// Announce only the summary of a tx on every every new tx import.
+			tx_handler_controller.announce_summary(hash);
 			let status = transaction_pool.status();
 			telemetry!(
 				telemetry;
@@ -784,7 +785,7 @@ where
 	} = params;
 
 	if warp_sync_params.is_none() && config.network.sync_mode.is_warp() {
-		return Err("Warp sync enabled, but no warp sync provider configured.".into())
+		return Err("Warp sync enabled, but no warp sync provider configured.".into());
 	}
 
 	if client.requires_full_sync() {
@@ -1014,7 +1015,7 @@ where
 			);
 			// This `return` might seem unnecessary, but we don't want to make it look like
 			// everything is working as normal even though the user is clearly misusing the API.
-			return
+			return;
 		}
 
 		future.await

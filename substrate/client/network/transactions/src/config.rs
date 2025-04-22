@@ -20,9 +20,10 @@
 
 use futures::prelude::*;
 use sc_network_common::ExHashT;
-use sp_runtime::traits::Block as BlockT;
+use sp_runtime::{traits::Block as BlockT, transaction_validity::TransactionSummary};
 use std::{collections::HashMap, future::Future, pin::Pin, time};
 
+// TODO: Attention, we should look into this constant
 /// Interval at which we propagate transactions;
 pub(crate) const PROPAGATE_TIMEOUT: time::Duration = time::Duration::from_millis(2900);
 
@@ -67,6 +68,10 @@ pub trait TransactionPool<H: ExHashT, B: BlockT>: Send + Sync {
 	fn on_broadcasted(&self, propagations: HashMap<H, Vec<String>>);
 	/// Get transaction by hash.
 	fn transaction(&self, hash: &H) -> Option<B::Extrinsic>;
+	/// Get summary of the transaction.
+	fn summary(&self, hash: &H) -> Option<TransactionSummary<H>>;
+	/// Get summaries of transactions from the ready pool.
+	fn summaries(&self) -> Vec<TransactionSummary<H>>;
 }
 
 /// Dummy implementation of the [`TransactionPool`] trait for a transaction pool that is always
@@ -94,5 +99,13 @@ impl<H: ExHashT + Default, B: BlockT> TransactionPool<H, B> for EmptyTransaction
 
 	fn transaction(&self, _h: &H) -> Option<B::Extrinsic> {
 		None
+	}
+
+	fn summary(&self, _h: &H) -> Option<TransactionSummary<H>> {
+		None
+	}
+
+	fn summaries(&self) -> Vec<TransactionSummary<H>> {
+		Vec::new()
 	}
 }

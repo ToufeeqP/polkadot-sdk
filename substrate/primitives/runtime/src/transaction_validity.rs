@@ -324,6 +324,18 @@ impl ValidTransaction {
 	}
 }
 
+/// Transaction summary.
+#[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug, TypeInfo)]
+pub struct TransactionSummary<Hash> {
+	/// Transaction hash
+	pub hash: Hash,
+	/// Transaction priority
+	pub priority: TransactionPriority,
+	/// Transaction length in bytes
+	pub length: u32,
+	/// The tags this transaction provides.
+	pub provides: Vec<TransactionTag>,
+}
 /// `ValidTransaction` builder.
 ///
 ///

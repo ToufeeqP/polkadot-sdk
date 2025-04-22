@@ -48,7 +48,10 @@ use sc_network_sync::SyncingService;
 use sc_utils::mpsc::TracingUnboundedReceiver;
 use sp_blockchain::HeaderMetadata;
 use sp_consensus::SyncOracle;
-use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
+use sp_runtime::{
+	traits::{Block as BlockT, Header as HeaderT},
+	transaction_validity::TransactionSummary,
+};
 
 pub use self::{
 	builder::{
@@ -451,6 +454,17 @@ where
 		.collect()
 }
 
+/// Get summary of all transaction in the ready pool for Announcement.
+fn transactions_summary<Pool, B, H, E>(pool: &Pool) -> Vec<TransactionSummary<H>>
+where
+	Pool: TransactionPool<Block = B, Hash = H, Error = E>,
+	B: BlockT,
+	H: std::hash::Hash + Eq + sp_runtime::traits::Member + sp_runtime::traits::MaybeSerialize,
+	E: IntoPoolError + From<sc_transaction_pool_api::error::Error>,
+{
+	pool.ready().filter(|t| t.is_propagable()).map(|t| t.summary()).collect()
+}
+
 impl<B, H, C, Pool, E> sc_network_transactions::config::TransactionPool<H, B>
 	for TransactionPoolAdapter<C, Pool>
 where
@@ -493,9 +507,8 @@ where
 			match import_future.await {
 				Ok(_) => TransactionImport::NewGood,
 				Err(e) => match e.into_pool_error() {
-					Ok(sc_transaction_pool_api::error::Error::AlreadyImported(_)) => {
-						TransactionImport::KnownGood
-					},
+					Ok(sc_transaction_pool_api::error::Error::AlreadyImported(_)) =>
+						TransactionImport::KnownGood,
 					Ok(e) => {
 						debug!("Error adding transaction to the pool: {:?}", e);
 						TransactionImport::Bad
@@ -520,6 +533,20 @@ where
 			// Only propagable transactions should be resolved for network service.
 			|tx| if tx.is_propagable() { Some(tx.data().clone()) } else { None },
 		)
+	}
+
+	fn summary(&self, hash: &H) -> Option<TransactionSummary<H>> {
+		self.pool.ready_transaction(hash).and_then(|tx| {
+			if tx.is_propagable() {
+				Some(tx.summary())
+			} else {
+				None
+			}
+		})
+	}
+
+	fn summaries(&self) -> Vec<TransactionSummary<H>> {
+		transactions_summary(&*self.pool)
 	}
 }
 

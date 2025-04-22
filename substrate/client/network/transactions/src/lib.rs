@@ -45,7 +45,7 @@ use sc_network::{
 use sc_network_common::{role::ObservedRole, ExHashT};
 use sc_network_sync::{SyncEvent, SyncEventStream};
 use sc_utils::mpsc::{tracing_unbounded, TracingUnboundedReceiver, TracingUnboundedSender};
-use sp_runtime::traits::Block as BlockT;
+use sp_runtime::{traits::Block as BlockT, transaction_validity::TransactionSummary};
 
 use std::{
 	collections::{hash_map::Entry, HashMap},
@@ -60,6 +60,22 @@ pub mod config;
 
 /// A set of transactions.
 pub type Transactions<E> = Vec<E>;
+
+/// A transaction handler messages
+#[derive(Debug, Clone, Encode, Decode)]
+pub enum TransactionsMessage<E, H: ExHashT> {
+	/// A list of full transactions
+	#[codec(index = 0)]
+	Transactions(Vec<E>),
+
+	/// Lightweight transaction summary announcements
+	#[codec(index = 1)]
+	TransactionAnnouncement(Vec<TransactionSummary<H>>),
+
+	/// Requests for full transactions by their hashes
+	#[codec(index = 2)]
+	TransactionRequest(Vec<H>),
+}
 
 mod rep {
 	use sc_network::ReputationChange as Rep;
@@ -106,7 +122,7 @@ impl<H: ExHashT> Future for PendingTransaction<H> {
 
 	fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
 		if let Poll::Ready(import_result) = self.validation.poll_unpin(cx) {
-			return Poll::Ready((self.tx_hash.clone(), import_result))
+			return Poll::Ready((self.tx_hash.clone(), import_result));
 		}
 
 		Poll::Pending
@@ -220,11 +236,26 @@ impl<H: ExHashT> TransactionsHandlerController<H> {
 	pub fn propagate_transaction(&self, hash: H) {
 		let _ = self.to_handler.unbounded_send(ToHandler::PropagateTransaction(hash));
 	}
+
+	/// You must call when new transactions are imported by the transaction pool.
+	///
+	/// This will announce all transactions that are ready to be included in the block.
+	/// This will not propagate transactions to peers but instead just sends a summary of the
+	/// trasnaction.
+	pub fn announce_summaries(&self) {
+		let _ = self.to_handler.unbounded_send(ToHandler::AnnounceSummaries);
+	}
+
+	pub fn announce_summary(&self, hash: H) {
+		let _ = self.to_handler.unbounded_send(ToHandler::AnnounceSummary(hash));
+	}
 }
 
 enum ToHandler<H: ExHashT> {
 	PropagateTransactions,
 	PropagateTransaction(H),
+	AnnounceSummaries,
+	AnnounceSummary(H),
 }
 
 /// Handler for transactions. Call [`TransactionsHandler::run`] to start the processing.
@@ -274,6 +305,7 @@ where
 	H: ExHashT,
 	N: NetworkPeers + NetworkEventStream + NetworkNotification,
 	S: SyncEventStream + sp_consensus::SyncOracle,
+	TransactionsMessage<B::Extrinsic, H>: Encode + Decode,
 {
 	/// Turns the [`TransactionsHandler`] into a future that should run forever and not be
 	/// interrupted.
@@ -281,7 +313,9 @@ where
 		loop {
 			futures::select! {
 				_ = self.propagate_timeout.next() => {
-					self.propagate_transactions();
+					// Maybe we can have a flag to decide whetehr to only announce the transation summary or propagate transactions
+					// self.propagate_transactions();
+					self.announce_transactions();
 				},
 				(tx_hash, result) = self.pending_transactions.select_next_some() => {
 					if let Some(peers) = self.pending_transactions_peers.remove(&tx_hash) {
@@ -302,6 +336,12 @@ where
 					match message {
 						ToHandler::PropagateTransaction(hash) => self.propagate_transaction(&hash),
 						ToHandler::PropagateTransactions => self.propagate_transactions(),
+						ToHandler::AnnounceSummaries => self.announce_transactions(),
+						ToHandler::AnnounceSummary(hash) => {
+							if let Some(summary) = self.transaction_pool.summary(&hash) {
+								self.do_propagate_announcements(&[summary]);
+							}
+						},
 					}
 				},
 				event = self.notification_service.next_event().fuse() => {
@@ -329,7 +369,7 @@ where
 			NotificationEvent::NotificationStreamOpened { peer, handshake, .. } => {
 				let Some(role) = self.network.peer_role(peer, handshake) else {
 					log::debug!(target: "sub-libp2p", "role for {peer} couldn't be determined");
-					return
+					return;
 				};
 
 				let _was_in = self.peers.insert(
@@ -348,12 +388,31 @@ where
 				debug_assert!(_peer.is_some());
 			},
 			NotificationEvent::NotificationReceived { peer, notification } => {
-				if let Ok(m) =
-					<Transactions<B::Extrinsic> as Decode>::decode(&mut notification.as_ref())
+				// if let Ok(m) =
+				// 	<Transactions<B::Extrinsic> as Decode>::decode(&mut notification.as_ref())
+				// {
+				// 	self.on_transactions(peer, m);
+				// } else {
+				// 	warn!(target: "sub-libp2p", "Failed to decode transactions list");
+				// }
+				// Decode the incoming message to TransactionsMessage type & handle each type
+				// For now, not handling the existing message types
+				if let Ok(message) =
+					TransactionsMessage::<B::Extrinsic, H>::decode(&mut notification.as_ref())
 				{
-					self.on_transactions(peer, m);
+					match message {
+						TransactionsMessage::Transactions(transactions) => {
+							self.on_transactions(peer, transactions);
+						},
+						TransactionsMessage::TransactionAnnouncement(summaries) => {
+							self.handle_announcement(peer, summaries);
+						},
+						TransactionsMessage::TransactionRequest(hashes) => {
+							self.handle_request(peer, hashes);
+						},
+					}
 				} else {
-					warn!(target: "sub-libp2p", "Failed to decode transactions list");
+					warn!(target: "sub-libp2p", "Failed to decode TransactionsMessage");
 				}
 			},
 		}
@@ -389,7 +448,7 @@ where
 		// Accept transactions only when node is not major syncing
 		if self.sync.is_major_syncing() {
 			trace!(target: "sync", "{} Ignoring transactions while major syncing", who);
-			return
+			return;
 		}
 
 		trace!(target: "sync", "Received {} transactions from {}", transactions.len(), who);
@@ -401,7 +460,7 @@ where
 						"Ignoring any further transactions that exceed `MAX_PENDING_TRANSACTIONS`({}) limit",
 						MAX_PENDING_TRANSACTIONS,
 					);
-					break
+					break;
 				}
 
 				let hash = self.transaction_pool.hash_of(&t);
@@ -425,6 +484,49 @@ where
 		}
 	}
 
+	// TODO: Add reputation system to handle announcement & requests
+	fn handle_announcement(&mut self, peer: PeerId, summaries: Vec<TransactionSummary<H>>) {
+		if self.sync.is_major_syncing() {
+			trace!(target: "sync", "Ignoring announcements from {} while major syncing", peer);
+			return;
+		}
+
+		trace!(target: "sync", "Received {} transaction summaries from {}", summaries.len(), peer);
+		// Filter transactions we dont have in our pool
+		let hashes: Vec<H> = summaries
+			.iter()
+			.filter(|s| !self.transaction_pool.transaction(&s.hash).is_some())
+			.map(|s| s.hash.clone())
+			.collect();
+
+		// TODO: we should have a sophisticated logic here to determine if this node need these txs
+		// or not, for now we will check only if they exist in our pool or not
+		if !hashes.is_empty() {
+			self.notification_service.send_sync_notification(
+				&peer,
+				TransactionsMessage::TransactionRequest(hashes).encode(),
+			);
+		}
+	}
+
+	fn handle_request(&mut self, peer: PeerId, hashes: Vec<H>) {
+		if self.sync.is_major_syncing() {
+			trace!(target: "sync", "Ignoring transaction requests from {} while major syncing", peer);
+			return;
+		}
+
+		trace!(target: "sync", "Received {} transaction requests from {}", hashes.len(), peer);
+		let transactions: Vec<_> =
+			hashes.iter().filter_map(|h| self.transaction_pool.transaction(h)).collect();
+
+		if !transactions.is_empty() {
+			self.notification_service.send_sync_notification(
+				&peer,
+				TransactionsMessage::Transactions(transactions).encode(),
+			);
+		}
+	}
+
 	fn on_handle_transaction_import(&mut self, who: PeerId, import: TransactionImport) {
 		match import {
 			TransactionImport::KnownGood =>
@@ -439,7 +541,7 @@ where
 	pub fn propagate_transaction(&mut self, hash: &H) {
 		// Accept transactions only when node is not major syncing
 		if self.sync.is_major_syncing() {
-			return
+			return;
 		}
 
 		debug!(target: "sync", "Propagating transaction [{:?}]", hash);
@@ -459,7 +561,7 @@ where
 		for (who, peer) in self.peers.iter_mut() {
 			// never send transactions to the light node
 			if matches!(peer.role, ObservedRole::Light) {
-				continue
+				continue;
 			}
 
 			let (hashes, to_send): (Vec<_>, Vec<_>) = transactions
@@ -499,11 +601,52 @@ where
 		propagated_to
 	}
 
+	/// Call when we must announce ready transactions summary to peers.
+	fn announce_transactions(&mut self) {
+		// Accept transactions only when node is not major syncing
+		if self.sync.is_major_syncing() {
+			return;
+		}
+
+		trace!(target: "sync", "Announcing transaction summaries");
+		let summaries = self.transaction_pool.summaries();
+		let propagated_to = self.do_propagate_announcements(&summaries);
+		self.transaction_pool.on_broadcasted(propagated_to);
+	}
+
+	fn do_propagate_announcements(
+		&mut self,
+		summaries: &[TransactionSummary<H>],
+	) -> HashMap<H, Vec<String>> {
+		let mut propagated_to: HashMap<H, Vec<String>> = HashMap::new();
+
+		for (who, peer) in self.peers.iter_mut() {
+			let announcements: Vec<_> = summaries
+				.iter()
+				.filter(|s| peer.known_transactions.insert(s.hash.clone()))
+				.cloned()
+				.collect();
+
+			if !announcements.is_empty() {
+				for summary in &announcements {
+					propagated_to.entry(summary.hash.clone()).or_default().push(who.to_base58());
+				}
+
+				// Encoding the enum requires full type resolution for generics
+				let msg: TransactionsMessage<B::Extrinsic, H> =
+					TransactionsMessage::TransactionAnnouncement(announcements);
+				self.notification_service.send_sync_notification(who, msg.encode());
+			}
+		}
+
+		propagated_to
+	}
+
 	/// Call when we must propagate ready transactions to peers.
 	fn propagate_transactions(&mut self) {
 		// Accept transactions only when node is not major syncing
 		if self.sync.is_major_syncing() {
-			return
+			return;
 		}
 
 		debug!(target: "sync", "Propagating transactions");
