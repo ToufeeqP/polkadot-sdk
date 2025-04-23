@@ -23,6 +23,7 @@
 use std::{cmp::Ordering, collections::HashSet, fmt, hash, sync::Arc};
 
 use crate::LOG_TARGET;
+use codec::Encode;
 use log::{debug, trace, warn};
 use sc_transaction_pool_api::{error, InPoolTransaction, PoolStatus};
 use serde::Serialize;
@@ -112,7 +113,7 @@ impl<Hash, Extrinsic> AsRef<Extrinsic> for Transaction<Hash, Extrinsic> {
 	}
 }
 
-impl<Hash: Clone, Extrinsic> InPoolTransaction for Transaction<Hash, Extrinsic> {
+impl<Hash: Clone, Extrinsic: Encode> InPoolTransaction for Transaction<Hash, Extrinsic> {
 	type Transaction = Extrinsic;
 	type Hash = Hash;
 
@@ -148,7 +149,7 @@ impl<Hash: Clone, Extrinsic> InPoolTransaction for Transaction<Hash, Extrinsic> 
 		TransactionSummary {
 			hash: self.hash.clone(),
 			priority: self.priority,
-			length: Default::default(),
+			length: self.data.encoded_size() as u32,
 			provides: self.provides.clone(),
 		}
 	}
