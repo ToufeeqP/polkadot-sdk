@@ -968,6 +968,7 @@ pub fn new_full<OverseerGenerator: OverseerGen>(
 			block_announce_validator_builder: None,
 			warp_sync_params: Some(WarpSyncParams::WithProvider(warp_sync)),
 			block_relay: None,
+			keystore: keystore_container.keystore(),
 		})?;
 
 	if config.offchain_worker.enabled {

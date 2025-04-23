@@ -129,6 +129,7 @@ pub fn new_full(config: Configuration, consensus: Consensus) -> Result<TaskManag
 			block_announce_validator_builder: None,
 			warp_sync_params: None,
 			block_relay: None,
+			keystore: keystore_container.keystore(),
 		})?;
 
 	if config.offchain_worker.enabled {

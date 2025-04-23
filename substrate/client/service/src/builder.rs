@@ -745,6 +745,8 @@ pub struct BuildNetworkParams<'a, TBl: BlockT, TExPool, TImpQu, TCl> {
 	/// User specified block relay params. If not specified, the default
 	/// block request handler will be used.
 	pub block_relay: Option<BlockRelayParams<TBl>>,
+	/// A shared keystore.
+	pub keystore: KeystorePtr,
 }
 
 /// Build the network service, the network status sinks and an RPC sender.
@@ -786,6 +788,7 @@ where
 		block_announce_validator_builder,
 		warp_sync_params,
 		block_relay,
+		keystore,
 	} = params;
 
 	if warp_sync_params.is_none() && config.network.sync_mode.is_warp() {
@@ -955,8 +958,6 @@ where
 	let has_bootnodes = !network_params.network_config.network_config.boot_nodes.is_empty();
 	let network_mut = sc_network::NetworkWorker::new(network_params)?;
 	let network = network_mut.service().clone();
-	let keystore_container = KeystoreContainer::new(&config.keystore)?;
-	let keystore = keystore_container.local_keystore();
 	// TODO: Fix this, we should not directly wire babe like this
 	let babe_authority_discovery = Arc::new(BabeAuthorityDiscovery::new(
 		client.clone(),
