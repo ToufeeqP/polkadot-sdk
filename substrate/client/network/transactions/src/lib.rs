@@ -345,11 +345,8 @@ where
 						ToHandler::PropagateTransaction(hash) => self.propagate_transaction(&hash),
 						ToHandler::PropagateTransactions => self.propagate_transactions(),
 						ToHandler::AnnounceSummaries => self.announce_transactions(),
-						ToHandler::AnnounceSummary(hash) => {
-							if let Some(summary) = self.transaction_pool.summary(&hash) {
-								self.do_propagate_announcements(&[summary]);
-							}
-						},
+						// To keep the transaction status events in-order, we need the broadcasted info, so using announce_transaction
+						ToHandler::AnnounceSummary(hash) => self.announce_transaction(&hash),
 					}
 				},
 				event = self.notification_service.next_event().fuse() => {
@@ -607,6 +604,20 @@ where
 		}
 
 		propagated_to
+	}
+
+	/// Call when we must announce a single ready transaction summary to peers.
+	fn announce_transaction(&mut self, hash: &H) {
+		// announce only when we're not major syncing
+		if self.sync.is_major_syncing() {
+			return;
+		}
+
+		trace!(target: "sync", "Announcing transaction summary");
+		if let Some(summary) = self.transaction_pool.summary(&hash) {
+			let propagated_to = self.do_propagate_announcements(&[summary]);
+			self.transaction_pool.on_broadcasted(propagated_to);
+		}
 	}
 
 	/// Call when we must announce ready transactions summary to peers.
