@@ -507,6 +507,7 @@ where
 		// TODO: we can have a more sophisticated logic here to determine if this client need these txs
 		// or not, for now we're only checking if they exist in client's pool or not & if client is authoring the blocks in near future
 		if !hashes.is_empty() && self.authority_discovery.will_author_in_next_slots(SLOTS_TO_CHECK){
+			trace!(target: "sync", "Requesting {} transactions from {}", hashes.len(), peer);
 			self.notification_service.send_sync_notification(
 				&peer,
 				TransactionMessage::TransactionRequest(hashes).encode(),
@@ -639,23 +640,19 @@ where
 	) -> HashMap<H, Vec<String>> {
 		let mut propagated_to: HashMap<H, Vec<String>> = HashMap::new();
 
-		for (who, peer) in self.peers.iter_mut() {
-			let announcements: Vec<_> = summaries
-				.iter()
-				.filter(|s| peer.known_transactions.insert(s.hash.clone()))
-				.cloned()
-				.collect();
+		let announcements: Vec<_> = summaries.to_vec();
+		if announcements.is_empty() {
+			return propagated_to;
+		}
 
-			if !announcements.is_empty() {
-				for summary in &announcements {
-					propagated_to.entry(summary.hash.clone()).or_default().push(who.to_base58());
-				}
-
-				// Encoding the enum requires full type resolution for generics
-				let msg: TransactionMessage<B::Extrinsic, H> =
-					TransactionMessage::TransactionAnnouncement(announcements);
-				self.notification_service.send_sync_notification(who, msg.encode());
+		for (who, peer) in self.peers.iter() {
+			for summary in &announcements {
+				propagated_to.entry(summary.hash.clone()).or_default().push(who.to_base58());
 			}
+
+			let msg: TransactionMessage<B::Extrinsic, H> =
+				TransactionMessage::TransactionAnnouncement(announcements.clone());
+			self.notification_service.send_sync_notification(who, msg.encode());
 		}
 
 		propagated_to
