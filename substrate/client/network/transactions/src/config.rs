@@ -23,9 +23,8 @@ use sc_network_common::ExHashT;
 use sp_runtime::{traits::Block as BlockT, transaction_validity::TransactionSummary};
 use std::{collections::HashMap, future::Future, pin::Pin, time};
 
-// TODO: Attention, we should look into this constant
 /// Interval at which we propagate transactions;
-pub(crate) const PROPAGATE_TIMEOUT: time::Duration = time::Duration::from_millis(5000);
+pub(crate) const PROPAGATE_TIMEOUT: time::Duration = time::Duration::from_millis(10_000);
 
 /// Number of slots to check if the node is going to author a to decide whether to request transactions or not.
 pub(crate) const SLOTS_TO_CHECK: u64 = 2;

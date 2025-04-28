@@ -616,6 +616,7 @@ where
 
 		trace!(target: "sync", "Announcing transaction summary");
 		if let Some(summary) = self.transaction_pool.summary(&hash) {
+			trace!(target: "sync", "Announcing transaction summary {:?}", summary);
 			let propagated_to = self.do_propagate_announcements(&[summary]);
 			self.transaction_pool.on_broadcasted(propagated_to);
 		}
@@ -645,7 +646,7 @@ where
 			return propagated_to;
 		}
 
-		for (who, peer) in self.peers.iter() {
+		for (who, _peer) in self.peers.iter() {
 			for summary in &announcements {
 				propagated_to.entry(summary.hash.clone()).or_default().push(who.to_base58());
 			}
