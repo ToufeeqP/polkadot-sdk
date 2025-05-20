@@ -75,6 +75,7 @@ impl From<sc_network::ObservedRole> for ObservedRole {
 			sc_network::ObservedRole::Light => ObservedRole::Light,
 			sc_network::ObservedRole::Authority => ObservedRole::Authority,
 			sc_network::ObservedRole::Full => ObservedRole::Full,
+			sc_network::ObservedRole::Supernode => ObservedRole::Authority,
 		}
 	}
 }

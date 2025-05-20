@@ -36,6 +36,8 @@ pub enum ObservedRole {
 	Light,
 	/// Third-party authority.
 	Authority,
+	/// Supernode
+	Supernode,
 }
 
 impl ObservedRole {
@@ -47,7 +49,9 @@ impl ObservedRole {
 
 impl From<Roles> for ObservedRole {
 	fn from(roles: Roles) -> Self {
-		if roles.is_authority() {
+		if roles.is_supernode() {
+			ObservedRole::Supernode
+		} else if roles.is_authority() {
 			ObservedRole::Authority
 		} else if roles.is_full() {
 			ObservedRole::Full
@@ -64,12 +68,19 @@ pub enum Role {
 	Full,
 	/// Actual authority.
 	Authority,
+	/// Supernode
+	Supernode,
 }
 
 impl Role {
 	/// True for [`Role::Authority`].
 	pub fn is_authority(&self) -> bool {
 		matches!(self, Self::Authority)
+	}
+
+	/// True for [`Role::Supernode`].
+	pub fn is_supernode(&self) -> bool {
+		matches!(self, Self::Supernode)
 	}
 }
 
@@ -78,6 +89,7 @@ impl std::fmt::Display for Role {
 		match self {
 			Self::Full => write!(f, "FULL"),
 			Self::Authority => write!(f, "AUTHORITY"),
+			Self::Supernode => write!(f, "SUPERNODE"),
 		}
 	}
 }
@@ -93,6 +105,8 @@ bitflags::bitflags! {
 		const LIGHT = 0b00000010;
 		/// Act as an authority
 		const AUTHORITY = 0b00000100;
+		/// Supernode
+		const SUPERNODE = 0b00001000;
 	}
 }
 
@@ -107,6 +121,11 @@ impl Roles {
 		*self == Self::AUTHORITY
 	}
 
+	/// Does this role represents a client that does store full blocks
+	pub fn is_supernode(&self) -> bool {
+		*self == Self::SUPERNODE
+	}
+
 	/// Does this role represents a client that does not hold full chain data locally?
 	pub fn is_light(&self) -> bool {
 		!self.is_full()
@@ -118,6 +137,7 @@ impl<'a> From<&'a Role> for Roles {
 		match roles {
 			Role::Full => Self::FULL,
 			Role::Authority => Self::AUTHORITY,
+			Role::Supernode => Self::SUPERNODE,
 		}
 	}
 }

@@ -736,6 +736,7 @@ impl CatchUpConfig {
 				ObservedRole::Authority => true,
 				ObservedRole::Light => false,
 				ObservedRole::Full => !only_from_authorities,
+				ObservedRole::Supernode	=> true,
 			},
 		}
 	}

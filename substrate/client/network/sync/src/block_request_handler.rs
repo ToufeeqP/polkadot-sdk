@@ -19,6 +19,7 @@
 
 use crate::{
 	block_relay_protocol::{BlockDownloader, BlockRelayParams, BlockResponseError, BlockServer},
+	da_utils::{is_da_extrinsic, extract_da_summary},
 	schema::v1::{
 		block_request::FromBlock as FromBlockSchema, BlockRequest as BlockRequestSchema,
 		BlockResponse as BlockResponseSchema, BlockResponse, Direction,
@@ -46,7 +47,7 @@ use schnellru::{ByLength, LruMap};
 use sp_blockchain::HeaderBackend;
 use sp_runtime::{
 	generic::BlockId,
-	traits::{Block as BlockT, Header, One, Zero},
+	traits::{Block as BlockT, Header, One, Zero}, OpaqueExtrinsic,
 };
 use std::{
 	cmp::min,
@@ -361,6 +362,7 @@ where
 		let get_body = attributes.contains(BlockAttributes::BODY);
 		let get_indexed_body = attributes.contains(BlockAttributes::INDEXED_BODY);
 		let get_justification = attributes.contains(BlockAttributes::JUSTIFICATION);
+		let get_da_exts = attributes.contains(BlockAttributes::DA_EXTRINSICS);
 
 		let mut blocks = Vec::new();
 
@@ -407,18 +409,30 @@ where
 					(Vec::new(), justification, is_empty_justification)
 				};
 
-			let body = if get_body {
-				match self.client.block_body(hash)? {
-					Some(mut extrinsics) =>
-						extrinsics.iter_mut().map(|extrinsic| extrinsic.encode()).collect(),
-					None => {
-						log::trace!(target: LOG_TARGET, "Missing data for block request.");
-						break
-					},
-				}
-			} else {
-				Vec::new()
-			};
+				let body = if get_body {
+					match self.client.block_body(hash)? {
+						Some(extrinsics) => extrinsics
+							.iter()
+							.map(|extrinsic| {
+								let encoded  = extrinsic.encode();
+								let opaque_extrinsic = OpaqueExtrinsic::decode(&mut &encoded[..]).expect("Failed  to decode opaque");
+								if !get_da_exts && is_da_extrinsic(&opaque_extrinsic) {
+									// Replace DA extrinsic with summary
+									let summary = extract_da_summary(&opaque_extrinsic);
+									summary.encode()
+								} else {
+									encoded
+								}
+							})
+							.collect(),
+						None => {
+							log::trace!(target: LOG_TARGET, "Missing data for block request.");
+							break;
+						},
+					}
+				} else {
+					Vec::new()
+				};
 
 			let indexed_body = if get_indexed_body {
 				match self.client.block_indexed_body(hash)? {

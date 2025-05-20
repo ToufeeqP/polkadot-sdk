@@ -155,6 +155,7 @@ impl MetricsService {
 			Role::Full => 1u64,
 			// 2u64 used to represent light client role
 			Role::Authority { .. } => 4u64,
+			Role::Supernode => 8u64,
 		};
 
 		PrometheusMetrics::setup(

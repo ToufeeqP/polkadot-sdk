@@ -102,6 +102,7 @@ const MAX_KNOWN_BLOCKS: usize = 1024; // ~32kb per peer + LruHashSet overhead
 /// If the block announces stream to peer has been inactive for 30 seconds meaning local node
 /// has not sent or received block announcements to/from the peer, report the node for inactivity,
 /// disconnect it and attempt to establish connection to some other peer.
+// TODO: This should be updated for Avail
 const INACTIVITY_EVICT_THRESHOLD: Duration = Duration::from_secs(30);
 
 /// When `SyncingEngine` is started, wait two minutes before actually staring to count peers as

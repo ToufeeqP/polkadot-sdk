@@ -34,6 +34,8 @@ pub enum SyncMode {
 	},
 	/// Warp sync - verify authority set transitions and the latest state.
 	Warp,
+	/// DA block - Full block which contains the DA extrinsics as well.
+	FullWithDa,
 }
 
 impl SyncMode {
@@ -45,6 +47,11 @@ impl SyncMode {
 	/// Returns `true` if `self` is [`Self::LightState`].
 	pub fn light_state(&self) -> bool {
 		matches!(self, Self::LightState { .. })
+	}
+
+	/// Returns `true` if `self` is [`Self::FullWithDa`].
+	pub fn is_da_full(&self) -> bool {
+		matches!(self, Self::FullWithDa)
 	}
 }
 

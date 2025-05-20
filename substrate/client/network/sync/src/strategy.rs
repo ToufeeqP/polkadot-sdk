@@ -55,6 +55,7 @@ fn chain_sync_mode(sync_mode: SyncMode) -> ChainSyncMode {
 		SyncMode::LightState { skip_proofs, storage_chain_mode } =>
 			ChainSyncMode::LightState { skip_proofs, storage_chain_mode },
 		SyncMode::Warp => ChainSyncMode::Full,
+		SyncMode::FullWithDa => ChainSyncMode::FullWithDa,
 	}
 }
 

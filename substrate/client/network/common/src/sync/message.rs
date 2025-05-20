@@ -54,6 +54,8 @@ bitflags! {
 		const JUSTIFICATION = 0b00010000;
 		/// Include indexed transactions for a block.
 		const INDEXED_BODY = 0b00100000;
+		/// Include DA extrinsics for a block.
+		const DA_EXTRINSICS = 0b01000000;
 	}
 }
 

@@ -242,6 +242,8 @@ pub enum ChainSyncMode {
 		/// Download indexed transactions for recent blocks.
 		storage_chain_mode: bool,
 	},
+	/// Full block with DA extrinsics
+	FullWithDa,
 }
 
 /// The main data structure which contains all the state for a chains
@@ -1260,6 +1262,9 @@ where
 
 	fn required_block_attributes(&self) -> BlockAttributes {
 		match self.mode {
+			ChainSyncMode::FullWithDa => {
+				BlockAttributes::HEADER | BlockAttributes::JUSTIFICATION | BlockAttributes::BODY | BlockAttributes::DA_EXTRINSICS
+			}
 			ChainSyncMode::Full => {
 				BlockAttributes::HEADER | BlockAttributes::JUSTIFICATION | BlockAttributes::BODY
 			},
@@ -1274,8 +1279,10 @@ where
 		}
 	}
 
+	// TODO: Revisit this to try skipping only DA transactions for light blocks
 	fn skip_execution(&self) -> bool {
 		match self.mode {
+			ChainSyncMode::FullWithDa => false,
 			ChainSyncMode::Full => false,
 			ChainSyncMode::LightState { .. } => true,
 		}
@@ -2283,6 +2290,7 @@ pub fn validate_blocks<Block: BlockT>(
 
 			return Err(BadPeer(*peer_id, rep::BAD_RESPONSE));
 		}
+		// TODO: Maybe check if Da Extrinsics were requested and not received? (only on DA blocks)
 	}
 
 	for b in blocks {
