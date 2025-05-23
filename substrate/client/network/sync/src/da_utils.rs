@@ -168,6 +168,14 @@ pub fn is_da_extrinsic(ext: &OpaqueExtrinsic) -> bool {
     matches!(extract_dispatch_indices(ext), Some((ORIGINAL_PALLET_INDEX, ORIGINAL_CALL_INDEX)))
 }
 
+/// Check if the extrinsic is either DA or its lite version.
+pub fn is_any_da(ext: &OpaqueExtrinsic) -> bool {
+    matches!(
+        extract_dispatch_indices(ext),
+        Some((ORIGINAL_PALLET_INDEX, ORIGINAL_CALL_INDEX))
+            | Some((ORIGINAL_PALLET_INDEX, LITE_CALL_INDEX))
+    )
+}
 
 #[test]
 fn test_extract_dispatch_indices() {

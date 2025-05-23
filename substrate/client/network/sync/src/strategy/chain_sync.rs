@@ -30,6 +30,7 @@
 
 use crate::{
 	blocks::BlockCollection,
+	da_utils::is_any_da,
 	extra_requests::ExtraRequests,
 	schema::v1::StateResponse,
 	strategy::{
@@ -40,7 +41,7 @@ use crate::{
 	LOG_TARGET,
 };
 
-use codec::Encode;
+use codec::{Decode, Encode};
 use libp2p::PeerId;
 use log::{debug, error, info, trace, warn};
 use prometheus_endpoint::{register, Gauge, GaugeVec, Opts, PrometheusError, Registry, U64};
@@ -58,7 +59,7 @@ use sp_runtime::{
 		Block as BlockT, CheckedSub, Hash, HashingFor, Header as HeaderT, NumberFor, One,
 		SaturatedConversion, Zero,
 	},
-	EncodedJustification, Justifications,
+	EncodedJustification, Justifications, OpaqueExtrinsic
 };
 
 use std::{
@@ -2307,24 +2308,38 @@ pub fn validate_blocks<Block: BlockT>(
 				return Err(BadPeer(*peer_id, rep::BAD_BLOCK));
 			}
 		}
-		// if let (Some(header), Some(body)) = (&b.header, &b.body) {
-		// 	let expected = *header.extrinsics_root();
-		// 	let got = HashingFor::<Block>::ordered_trie_root(
-		// 		body.iter().map(Encode::encode).collect(),
-		// 		sp_runtime::StateVersion::V0,
-		// 	);
-		// 	if expected != got {
-		// 		debug!(
-		// 			target: LOG_TARGET,
-		// 			"Bad extrinsic root for a block {} received from {}. Expected {:?}, got {:?}",
-		// 			b.hash,
-		// 			peer_id,
-		// 			expected,
-		// 			got,
-		// 		);
-		// 		return Err(BadPeer(*peer_id, rep::BAD_BLOCK));
-		// 	}
-		// }
+		if let (Some(header), Some(body)) = (&b.header, &b.body) {
+			let expected = *header.extrinsics_root();
+			// Filter out DA extrinsics before computing root
+			let filtered_extrinsics: Vec<Vec<u8>> = body
+			.iter()
+			.filter_map(|ext| {
+				let encoded = ext.encode();
+				let mut input = &encoded[..];
+
+				match OpaqueExtrinsic::decode(&mut input) {
+					Ok(op_ext) if !is_any_da(&op_ext) => Some(encoded),
+					_ => None,
+				}
+			})
+			.collect();
+
+			let got = HashingFor::<Block>::ordered_trie_root(
+				filtered_extrinsics,
+				sp_runtime::StateVersion::V0,
+			);
+			if expected != got {
+				debug!(
+					target: LOG_TARGET,
+					"Bad extrinsic root for a block {} received from {}. Expected {:?}, got {:?}",
+					b.hash,
+					peer_id,
+					expected,
+					got,
+				);
+				return Err(BadPeer(*peer_id, rep::BAD_BLOCK));
+			}
+		}
 	}
 
 	Ok(blocks.first().and_then(|b| b.header.as_ref()).map(|h| *h.number()))
