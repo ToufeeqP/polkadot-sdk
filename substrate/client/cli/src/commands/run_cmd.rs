@@ -50,6 +50,13 @@ pub struct RunCmd {
 	#[arg(long)]
 	pub validator: bool,
 
+	/// Enable supernode mode.
+	///
+	/// The node will be started with the supernode role and
+	/// participate in the DA sampling & putting them into DHT.
+	#[arg(long)]
+	pub supernode: bool,
+
 	/// Disable GRANDPA.
 	///
 	/// Disables voter when running in validator mode, otherwise disable the GRANDPA
@@ -334,10 +341,15 @@ impl CliConfiguration for RunCmd {
 	}
 
 	fn role(&self, is_dev: bool) -> Result<Role> {
-		let keyring = self.get_keyring();
-		let is_authority = self.validator || is_dev || keyring.is_some();
-
-		Ok(if is_authority { Role::Authority } else { Role::Full })
+		if self.supernode {
+			return Ok(Role::Supernode);
+		}
+		let is_authority = self.validator || is_dev || self.get_keyring().is_some();
+		Ok(if is_authority {
+			Role::Authority
+		} else {
+			Role::Full
+		})
 	}
 
 	fn force_authoring(&self) -> Result<bool> {

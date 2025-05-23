@@ -78,6 +78,8 @@ pub enum NodeRole {
 	Full,
 	/// The node is an authority
 	Authority,
+	/// The node is a supernode
+	Supernode,
 }
 
 /// The state of the syncing of the node.
