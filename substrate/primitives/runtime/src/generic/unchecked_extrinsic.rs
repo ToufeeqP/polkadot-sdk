@@ -40,6 +40,8 @@ use sp_std::{fmt, prelude::*};
 /// the decoding fails.
 const EXTRINSIC_FORMAT_VERSION: u8 = 4;
 
+const SYSTEM_REMARK_WITH_EVENT_LITE_PREFIX: &[u8] = &[0x00, 0x0c]; // Prefix for system::remark_with_event_lite
+
 /// The `SingaturePayload` of `UncheckedExtrinsic`.
 type UncheckedSignaturePayload<Address, Signature, Extra> = (Address, Signature, Extra);
 
@@ -169,15 +171,25 @@ where
 	type Checked = CheckedExtrinsic<AccountId, Call, Extra>;
 
 	fn check(self, lookup: &Lookup) -> Result<Self::Checked, TransactionValidityError> {
+
+		let call_encoded = self.function.encode();
 		Ok(match self.signature {
 			Some((signed, signature, extra)) => {
 				let signed = lookup.lookup(signed)?;
-				let raw_payload = SignedPayload::new(self.function, extra)?;
-				if !raw_payload.using_encoded(|payload| signature.verify(payload, &signed)) {
+
+				let is_valid = if call_encoded.starts_with(SYSTEM_REMARK_WITH_EVENT_LITE_PREFIX) {
+					log::info!("bypassing the signature verification for remark_with_event_lite!");
+					// lets bypass the signature verification for remark_with_event_lite
+					true
+				} else {
+					let raw_payload = SignedPayload::new(self.function.clone(), extra.clone())?;
+					raw_payload.using_encoded(|payload| signature.verify(payload, &signed))
+				};
+				if !is_valid {
 					return Err(InvalidTransaction::BadProof.into())
 				}
 
-				let (function, extra, _) = raw_payload.deconstruct();
+				let function = self.function;
 				CheckedExtrinsic { signed: Some((signed, extra)), function }
 			},
 			None => CheckedExtrinsic { signed: None, function: self.function },

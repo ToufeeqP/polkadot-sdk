@@ -19,7 +19,7 @@
 
 use crate::{
 	block_relay_protocol::{BlockDownloader, BlockRelayParams, BlockResponseError, BlockServer},
-	da_utils::{is_da_extrinsic, extract_da_summary},
+	da_utils::{is_da_extrinsic, convert_da_to_lite},
 	schema::v1::{
 		block_request::FromBlock as FromBlockSchema, BlockRequest as BlockRequestSchema,
 		BlockResponse as BlockResponseSchema, BlockResponse, Direction,
@@ -46,8 +46,7 @@ use sc_telemetry::custom_telemetry::*;
 use schnellru::{ByLength, LruMap};
 use sp_blockchain::HeaderBackend;
 use sp_runtime::{
-	generic::BlockId,
-	traits::{Block as BlockT, Header, One, Zero}, OpaqueExtrinsic,
+	generic::BlockId, traits::{Block as BlockT, Header, One, Zero}, OpaqueExtrinsic
 };
 use std::{
 	cmp::min,
@@ -417,9 +416,15 @@ where
 								let encoded  = extrinsic.encode();
 								let opaque_extrinsic = OpaqueExtrinsic::decode(&mut &encoded[..]).expect("Failed  to decode opaque");
 								if !get_da_exts && is_da_extrinsic(&opaque_extrinsic) {
-									// Replace DA extrinsic with summary
-									let summary = extract_da_summary(&opaque_extrinsic);
-									summary.encode()
+									log::debug!(target: LOG_TARGET, "DA extrinsic detected, trying to convert it to lite.");
+									// Replace DA extrinsic with lite extrinsic.
+									let encoded = convert_da_to_lite(&opaque_extrinsic)
+										.map(|lite| lite.encode())
+										.unwrap_or_else(|| {
+											log::error!(target: LOG_TARGET, "Failed to convert DA extrinsic to lite.");
+											encoded
+										});
+									encoded
 								} else {
 									encoded
 								}

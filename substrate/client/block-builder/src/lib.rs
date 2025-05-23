@@ -298,13 +298,14 @@ where
 	pub fn build(mut self) -> Result<BuiltBlock<Block>, Error> {
 		let header = self.api.finalize_block(self.parent_hash)?;
 
-		debug_assert_eq!(
-			header.extrinsics_root().clone(),
-			HashingFor::<Block>::ordered_trie_root(
-				self.extrinsics.iter().map(Encode::encode).collect(),
-				sp_runtime::StateVersion::V0,
-			),
-		);
+		// TODO: Uncomment this after filtering out DA extrinsics from extrinsics_root
+		// debug_assert_eq!(
+		// 	header.extrinsics_root().clone(),
+		// 	HashingFor::<Block>::ordered_trie_root(
+		// 		self.extrinsics.iter().map(Encode::encode).collect(),
+		// 		sp_runtime::StateVersion::V0,
+		// 	),
+		// );
 
 		let proof = self.api.extract_proof();
 

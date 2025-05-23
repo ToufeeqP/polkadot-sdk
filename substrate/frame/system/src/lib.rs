@@ -121,7 +121,7 @@ use sp_std::map;
 use sp_std::{fmt::Debug, marker::PhantomData, prelude::*};
 use sp_version::RuntimeVersion;
 
-use codec::{Decode, Encode, EncodeLike, FullCodec, MaxEncodedLen};
+use codec::{Compact, Decode, Encode, EncodeLike, FullCodec, Input, MaxEncodedLen};
 #[cfg(feature = "std")]
 use frame_support::traits::BuildGenesisConfig;
 use frame_support::{
@@ -186,6 +186,82 @@ pub fn extrinsics_root<H: Hash, E: codec::Encode>(extrinsics: &[E]) -> H::Output
 /// `state_version` 0.
 pub fn extrinsics_data_root<H: Hash>(xts: Vec<Vec<u8>>) -> H::Output {
 	H::ordered_trie_root(xts, sp_core::storage::StateVersion::V0)
+}
+
+const ORIGINAL_PALLET_INDEX: u8 = 0x00;
+const ORIGINAL_CALL_INDEX: u8 = 0x07;
+const LITE_CALL_INDEX: u8 = 0x0C;
+
+pub fn filtered_extrinsics_data_root<H: Hash>(xts: Vec<Vec<u8>>) -> H::Output {
+    let filtered = xts
+        .into_iter()
+        .filter(|ext_bytes| {
+            let mut input = &ext_bytes[..];
+
+            // === Decode Compact<u32> length prefix ===
+            if Compact::<u32>::decode(&mut input).is_err() {
+                return true; // Malformed: keep it for safety
+            }
+
+            // === Decode version byte ===
+            let version = match u8::decode(&mut input) {
+                Ok(v) => v,
+                Err(_) => return true,
+            };
+
+            // If it's not a signed extrinsic, we can't decode it meaningfully — keep it
+            if version & 0b1000_0000 == 0 {
+                return true;
+            }
+
+            // === Skip signer: type (1) + id (32) ===
+            if input.len() < 1 + 32 {
+                return true;
+            }
+            input = &input[1 + 32..];
+
+            // === Skip signature type (1) + sig (64) ===
+            if input.len() < 1 + 64 {
+                return true;
+            }
+            input = &input[1 + 64..];
+
+            // === Skip era ===
+            let era_first = match input.read_byte() {
+                Ok(b) => b,
+                Err(_) => return true,
+            };
+            if era_first != 0 {
+                if input.read_byte().is_err() {
+                    return true;
+                }
+            }
+
+            // === Skip nonce, tip, app_id ===
+            if Compact::<u32>::decode(&mut input).is_err()
+                || Compact::<u128>::decode(&mut input).is_err()
+                || Compact::<u32>::decode(&mut input).is_err()
+            {
+                return true;
+            }
+
+            // === Decode pallet + call index ===
+            let pallet = match input.read_byte() {
+                Ok(p) => p,
+                Err(_) => return true,
+            };
+            let call = match input.read_byte() {
+                Ok(c) => c,
+                Err(_) => return true,
+            };
+
+            // === Filter out target extrinsics ===
+            !((pallet == ORIGINAL_PALLET_INDEX && call == ORIGINAL_CALL_INDEX)
+                || (pallet == ORIGINAL_PALLET_INDEX && call == LITE_CALL_INDEX))
+        })
+        .collect::<Vec<_>>();
+
+    H::ordered_trie_root(filtered, sp_core::storage::StateVersion::V0)
 }
 
 /// An object to track the currently used extrinsic weight in a block.
@@ -680,13 +756,33 @@ pub mod pallet {
 
 		/// Make some on-chain remark and emit event.
 		#[pallet::call_index(7)]
-		#[pallet::weight(T::SystemWeightInfo::remark_with_event(remark.len() as u32))]
+		#[pallet::weight(
+			T::SystemWeightInfo::remark_with_event(10u32)
+		)]
+		// #[pallet::feeless_if(|origin: &OriginFor<T>,
+		// 	remark: &Vec<u8>,| -> bool { true })]
 		pub fn remark_with_event(
 			origin: OriginFor<T>,
 			remark: Vec<u8>,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
 			let hash = T::Hashing::hash(&remark[..]);
+			Self::deposit_event(Event::Remarked { sender: who, hash });
+			Ok(().into())
+		}
+
+		/// Lite version of remark_with_event. Not recommended for general use.
+		#[pallet::call_index(12)]
+		#[pallet::weight(
+			T::SystemWeightInfo::remark_with_event(10u32)
+		)]
+		// #[pallet::feeless_if(|origin: &OriginFor<T>,
+		// 	hash: &T::Hash| -> bool { true })]
+		pub fn remark_with_event_lite(
+			origin: OriginFor<T>,
+			hash: T::Hash, // hash of the remark_with_event's remark
+		) -> DispatchResultWithPostInfo {
+			let who = ensure_signed(origin)?;
 			Self::deposit_event(Event::Remarked { sender: who, hash });
 			Ok(().into())
 		}
@@ -1753,7 +1849,9 @@ impl<T: Config> Pallet<T> {
 		let extrinsics = (0..ExtrinsicCount::<T>::take().unwrap_or_default())
 			.map(ExtrinsicData::<T>::take)
 			.collect();
-		let extrinsics_root = extrinsics_data_root::<T::Hashing>(extrinsics);
+		// let extrinsics_root = extrinsics_data_root::<T::Hashing>(extrinsics);
+		// extrinsics_root will be computed by filtering out original & lite DA extrinsics
+		let extrinsics_root = filtered_extrinsics_data_root::<T::Hashing>(extrinsics);
 
 		// move block hash pruning window by one block
 		let block_hash_count = T::BlockHashCount::get();

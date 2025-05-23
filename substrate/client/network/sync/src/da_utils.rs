@@ -1,15 +1,101 @@
 use sp_runtime::OpaqueExtrinsic;
 use codec::{Compact, Decode, Encode, Input};
-use sp_core::{H256, blake2_256};
+use sp_core::blake2_256;
+use super::LOG_TARGET;
 
-/// A lightweight summary of DA transaction
-#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
-pub struct DaSummary {
-    pub app_id: u32,
-    pub blob_hash: H256,
-    pub tx_hash: H256,
-    pub size: u32, // size of the blob
-    pub commitments: Vec<[u8; 48]>,
+const ORIGINAL_PALLET_INDEX: u8 = 0x00;
+const ORIGINAL_CALL_INDEX: u8 = 0x07;
+const LITE_CALL_INDEX: u8 = 0x0C;
+
+/// Convert `remark_with_event` extrinsic to `remark_with_event_lite` format.
+pub fn convert_da_to_lite(original: &OpaqueExtrinsic) -> Option<OpaqueExtrinsic> {
+    log::debug!(target: LOG_TARGET, "Converting DA to its lite version");
+
+    let encoded = original.encode();
+    let mut input = &encoded[..];
+
+    // === Decode length prefix (ignored, will recompute later) ===
+    let _: Compact<u32> = Decode::decode(&mut input).ok()?;
+
+    // === Decode version byte ===
+    let version: u8 = Decode::decode(&mut input).ok()?;
+    if version & 0b1000_0000 == 0 {
+        // Only signed extrinsics are supported
+        return None;
+    }
+
+    let mut payload = Vec::new();
+    payload.push(version);
+
+    // === Signer ===
+    let signer_type = input.read_byte().ok()?;
+    payload.push(signer_type);
+
+    // AccountId32
+    let signer = &input[..32];
+    payload.extend_from_slice(signer);
+    input = &input[32..];
+
+    // Signature
+    let sig_type = input.read_byte().ok()?;
+    payload.push(sig_type);
+
+    let signature = &input[..64];
+    payload.extend_from_slice(signature);
+    input = &input[64..];
+
+    // Era
+    let era_first = input.read_byte().ok()?;
+    payload.push(era_first);
+    if era_first != 0 {
+        let era_second = input.read_byte().ok()?;
+        payload.push(era_second);
+    }
+
+    // Nonce and Tip
+    let nonce = Compact::<u32>::decode(&mut input).ok()?;
+    nonce.encode_to(&mut payload);
+
+    let tip = Compact::<u128>::decode(&mut input).ok()?;
+    tip.encode_to(&mut payload);
+
+    // App ID
+    let app_id = Compact::<u32>::decode(&mut input).ok()?;
+    app_id.encode_to(&mut payload);
+
+    // Call index
+    let pallet_index = input.read_byte().ok()?;
+    let call_index = input.read_byte().ok()?;
+    if (pallet_index, call_index) != (ORIGINAL_PALLET_INDEX, ORIGINAL_CALL_INDEX) {
+        return None;
+    }
+
+    // === Decode call args ===
+    let remark: Vec<u8> = Decode::decode(&mut input).ok()?;
+    let remark_hash = blake2_256(&remark);
+    log::info!(target: LOG_TARGET, "Remark hash: {:?}", remark_hash);
+
+    // === Construct new call ===
+    payload.push(ORIGINAL_PALLET_INDEX); // Pallet index for DA
+    payload.push(LITE_CALL_INDEX); // Call index for `remark_with_event_lite`
+
+    // remark.encode_to(&mut payload);
+    remark_hash.encode_to(&mut payload);
+
+    // === Encode length prefix ===
+    let mut out = Vec::new();
+    let len = payload.len() as u32;
+    Compact(len).encode_to(&mut out);
+    out.extend(payload);
+
+    // Final decoding validation
+    match OpaqueExtrinsic::from_bytes(&out[..]) {
+        Ok(opaque) => Some(opaque),
+        Err(e) => {
+            log::error!(target: LOG_TARGET, "Failed to convert to lite extrinsic: {:?}", e);
+            None
+        }
+    }
 }
 
 fn skip_multiaddress(input: &mut &[u8]) -> Option<()> {
@@ -77,57 +163,9 @@ fn extract_dispatch_indices(ext: &OpaqueExtrinsic) -> Option<(u8, u8)> {
     Some((module_index, call_index))
 }
 
-/// Attempt to parse an opaque extrinsic as a DA summary.
-pub fn extract_da_summary(ext: &OpaqueExtrinsic) -> Option<DaSummary> {
-    let encoded = ext.encode();
-    let tx_hash = H256::from(blake2_256(&encoded));
-    let mut input = &encoded[..];
-
-    // Skip length prefix
-    let _: Compact<u32> = Decode::decode(&mut input).ok()?;
-
-    // Decode version, check if signed
-    let version: u8 = Decode::decode(&mut input).ok()?;
-    let is_signed = version & 0b1000_0000 != 0;
-
-    if is_signed {
-        skip_multiaddress(&mut input)?;
-        skip_multisignature(&mut input)?;
-        skip_era(&mut input)?;
-        let _: Compact<u32> = Decode::decode(&mut input).ok()?; // nonce
-        let _: Compact<u128> = Decode::decode(&mut input).ok()?; // tip
-    }
-
-    // Skip app_id which was part of origin in signed call
-    let _: Compact<u32> = Decode::decode(&mut input).ok()?;
-
-    // Read module and call indices
-    let module_index = input.read_byte().ok()?;
-    let call_index = input.read_byte().ok()?;
-
-    if (module_index, call_index) != (0x1d, 0x01) {
-        return None;
-    }
-
-    // Now decode the call args: (app_id, blob, commitments)
-    let app_id: u32 = Decode::decode(&mut input).ok()?;
-    let blob: Vec<u8> = Decode::decode(&mut input).ok()?;
-    let commitments: Vec<[u8; 48]> = Decode::decode(&mut input).ok()?;
-
-    let blob_hash = H256::from(blake2_256(&blob));
-    let size = blob.len() as u32;
-
-    Some(DaSummary {
-        app_id,
-        blob_hash,
-        tx_hash,
-        size,
-        commitments,
-    })
-}
-
+/// Check if the extrinsic is a DA extrinsic.
 pub fn is_da_extrinsic(ext: &OpaqueExtrinsic) -> bool {
-    matches!(extract_dispatch_indices(ext), Some((0x1d, 0x01)))
+    matches!(extract_dispatch_indices(ext), Some((ORIGINAL_PALLET_INDEX, ORIGINAL_CALL_INDEX)))
 }
 
 
