@@ -87,9 +87,9 @@ impl<B: BlockT> SlotInfo<B> {
 }
 
 /// A stream that returns every time there is a new slot.
-pub(crate) struct Slots<Block, SC, IDP, SO> {
+pub(crate) struct Slots<Block, SC, IDP, SO, SD> {
 	last_slot: Slot,
-	slot_duration: Duration,
+	slot_duration: SD,
 	until_next_slot: Option<Delay>,
 	create_inherent_data_providers: IDP,
 	select_chain: SC,
@@ -97,10 +97,32 @@ pub(crate) struct Slots<Block, SC, IDP, SO> {
 	_phantom: std::marker::PhantomData<Block>,
 }
 
-impl<Block, SC, IDP, SO> Slots<Block, SC, IDP, SO> {
+impl<Block, SC, IDP, SO>
+	Slots<Block, SC, IDP, SO, Box<dyn Fn() -> Duration + Send + Sync + 'static>>
+{
 	/// Create a new `Slots` stream.
 	pub fn new(
 		slot_duration: Duration,
+		create_inherent_data_providers: IDP,
+		select_chain: SC,
+		sync_oracle: SO,
+	) -> Self {
+		Self::new_with_duration_source(
+			Box::new(move || slot_duration),
+			create_inherent_data_providers,
+			select_chain,
+			sync_oracle,
+		)
+	}
+}
+
+impl<Block, SC, IDP, SO, SD> Slots<Block, SC, IDP, SO, SD>
+where
+	SD: Fn() -> Duration,
+{
+	/// Create a new `Slots` stream with a dynamic slot duration source.
+	pub fn new_with_duration_source(
+		slot_duration: SD,
 		create_inherent_data_providers: IDP,
 		select_chain: SC,
 		sync_oracle: SO,
@@ -117,29 +139,33 @@ impl<Block, SC, IDP, SO> Slots<Block, SC, IDP, SO> {
 	}
 }
 
-impl<Block, SC, IDP, SO> Slots<Block, SC, IDP, SO>
+impl<Block, SC, IDP, SO, SD> Slots<Block, SC, IDP, SO, SD>
 where
 	Block: BlockT,
 	SC: SelectChain<Block>,
 	IDP: CreateInherentDataProviders<Block, ()> + 'static,
 	IDP::InherentDataProviders: crate::InherentDataProviderExt,
 	SO: SyncOracle,
+	SD: Fn() -> Duration,
 {
 	/// Returns a future that fires when the next slot starts.
 	pub async fn next_slot(&mut self) -> SlotInfo<Block> {
 		loop {
+			let slot_duration = (self.slot_duration)();
+
 			// Wait for slot timeout
 			self.until_next_slot
 				.take()
 				.unwrap_or_else(|| {
 					// Schedule first timeout.
-					let wait_dur = time_until_next_slot(self.slot_duration);
+					let wait_dur = time_until_next_slot(slot_duration);
 					Delay::new(wait_dur)
 				})
 				.await;
 
 			// Schedule delay for next slot.
-			let wait_dur = time_until_next_slot(self.slot_duration);
+			let slot_duration = (self.slot_duration)();
+			let wait_dur = time_until_next_slot(slot_duration);
 			self.until_next_slot = Some(Delay::new(wait_dur));
 
 			if self.sync_oracle.is_major_syncing() {
@@ -186,7 +212,7 @@ where
 				break SlotInfo::new(
 					slot,
 					Box::new(inherent_data_providers),
-					self.slot_duration,
+					slot_duration,
 					chain_head,
 					None,
 				)

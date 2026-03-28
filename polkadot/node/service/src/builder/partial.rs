@@ -188,14 +188,16 @@ where
 
 	let babe_config = sc_consensus_babe::configuration(&*client)?;
 	let slot_duration = babe_config.slot_duration();
-	let babe_inherent_config = babe_config.clone();
+	let babe_inherent_client = client.clone();
 	let (block_import, babe_link) = sc_consensus_babe::block_import(
 		babe_config.clone(),
 		beefy_block_import,
 		client.clone(),
 		Arc::new(move |_, _| {
-			let babe_inherent_config = babe_inherent_config.clone();
+			let babe_inherent_client = babe_inherent_client.clone();
 			async move {
+				let babe_inherent_config = sc_consensus_babe::configuration(&*babe_inherent_client)
+					.map_err(|e| sp_consensus::Error::ClientImport(e.to_string()))?;
 				let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
 				let slot =
 					sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_config(

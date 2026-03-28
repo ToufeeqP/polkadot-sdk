@@ -553,6 +553,38 @@ pub async fn start_slot_worker<B, C, W, SO, CIDP, Proof>(
 	}
 }
 
+/// Start a new slot worker with a dynamically refreshed slot duration.
+///
+/// Every time a new slot is triggered, the current slot duration is fetched from
+/// `slot_duration`, and `worker.on_slot` is called for the resulting slot.
+pub async fn start_slot_worker_with_slot_duration_source<B, C, W, SO, CIDP, Proof, SD>(
+	slot_duration: SD,
+	client: C,
+	mut worker: W,
+	sync_oracle: SO,
+	create_inherent_data_providers: CIDP,
+) where
+	B: BlockT,
+	C: SelectChain<B>,
+	W: SlotWorker<B, Proof>,
+	SO: SyncOracle + Send,
+	CIDP: CreateInherentDataProviders<B, ()> + Send + 'static,
+	CIDP::InherentDataProviders: InherentDataProviderExt + Send,
+	SD: Fn() -> SlotDuration + Send + 'static,
+{
+	let mut slots = Slots::new_with_duration_source(
+		move || slot_duration().as_duration(),
+		create_inherent_data_providers,
+		client,
+		sync_oracle,
+	);
+
+	loop {
+		let slot_info = slots.next_slot().await;
+		let _ = worker.on_slot(slot_info).await;
+	}
+}
+
 /// A header which has been checked
 pub enum CheckedHeader<H, S> {
 	/// A header which has slot in the future. this is the full header (not stripped)

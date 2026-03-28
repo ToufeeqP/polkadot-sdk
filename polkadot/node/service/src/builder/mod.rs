@@ -681,7 +681,7 @@ where
 			let client_clone = client.clone();
 			let overseer_handle =
 				overseer_handle.as_ref().ok_or(Error::AuthoritiesRequireRealOverseer)?.clone();
-			let babe_inherent_config = babe_link.config().clone();
+			let babe_inherent_client = client.clone();
 			let babe_config = sc_consensus_babe::BabeParams {
 				keystore: keystore_container.keystore(),
 				client: client.clone(),
@@ -693,7 +693,7 @@ where
 				create_inherent_data_providers: move |parent, ()| {
 					let client_clone = client_clone.clone();
 					let overseer_handle = overseer_handle.clone();
-					let babe_inherent_config = babe_inherent_config.clone();
+					let babe_inherent_client = babe_inherent_client.clone();
 
 					async move {
 						let parachain =
@@ -703,6 +703,9 @@ where
 								parent,
 							);
 
+						let babe_inherent_config =
+							sc_consensus_babe::configuration(&*babe_inherent_client)
+								.map_err(|e| sp_consensus::Error::ClientImport(e.to_string()))?;
 						let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
 
 						let slot =
