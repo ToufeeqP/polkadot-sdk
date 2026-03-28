@@ -450,16 +450,7 @@ where
 			}
 		},
 		Some(2) => {
-			let current = runtime_api.configuration(at_hash)?;
-			sp_consensus_babe::BabeConfigurationV2 {
-				slot_duration: current.slot_duration,
-				epoch_length: current.epoch_length,
-				c: current.c,
-				authorities: current.authorities,
-				randomness: current.randomness,
-				allowed_slots: current.allowed_slots,
-			}
-			.into()
+			runtime_api.configuration_before_version_3(at_hash)?.into()
 		},
 		Some(3) => runtime_api.configuration(at_hash)?,
 		_ =>
