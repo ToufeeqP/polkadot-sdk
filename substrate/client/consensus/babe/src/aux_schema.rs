@@ -21,7 +21,7 @@
 use codec::{Decode, Encode};
 use log::info;
 
-use crate::{migration::EpochV0, Epoch, LOG_TARGET};
+use crate::{migration::{EpochV0, EpochV1}, Epoch, LOG_TARGET};
 use sc_client_api::backend::AuxStore;
 use sc_consensus_epochs::{
 	migration::{EpochChangesV0For, EpochChangesV1For},
@@ -33,7 +33,7 @@ use sp_runtime::traits::Block as BlockT;
 
 const BABE_EPOCH_CHANGES_VERSION: &[u8] = b"babe_epoch_changes_version";
 const BABE_EPOCH_CHANGES_KEY: &[u8] = b"babe_epoch_changes";
-const BABE_EPOCH_CHANGES_CURRENT_VERSION: u32 = 3;
+const BABE_EPOCH_CHANGES_CURRENT_VERSION: u32 = 4;
 
 /// The aux storage key used to store the block weight of the given block hash.
 pub fn block_weight_key<H: Encode>(block_hash: H) -> Vec<u8> {
@@ -68,11 +68,12 @@ pub fn load_epoch_changes<Block: BlockT, B: AuxStore>(
 		Some(1) =>
 			load_decode::<_, EpochChangesV1For<Block, EpochV0>>(backend, BABE_EPOCH_CHANGES_KEY)?
 				.map(|v1| v1.migrate().map(|_, _, epoch| epoch.migrate(config))),
-		Some(2) => {
-			// v2 still uses `EpochChanges` v1 format but with a different `Epoch` type.
-			load_decode::<_, EpochChangesV1For<Block, Epoch>>(backend, BABE_EPOCH_CHANGES_KEY)?
-				.map(|v2| v2.migrate())
-		},
+		Some(2) =>
+			load_decode::<_, EpochChangesV1For<Block, EpochV1>>(backend, BABE_EPOCH_CHANGES_KEY)?
+				.map(|v2| v2.migrate().map(|_, _, epoch| epoch.migrate(config))),
+		Some(3) =>
+			load_decode::<_, EpochChangesFor<Block, EpochV1>>(backend, BABE_EPOCH_CHANGES_KEY)?
+				.map(|v3| v3.map(|_, _, epoch| epoch.migrate(config))),
 		Some(BABE_EPOCH_CHANGES_CURRENT_VERSION) =>
 			load_decode::<_, EpochChangesFor<Block, Epoch>>(backend, BABE_EPOCH_CHANGES_KEY)?,
 		Some(other) =>
@@ -183,12 +184,14 @@ mod test {
 		let epoch_changes = load_epoch_changes::<TestBlock, _>(
 			&client,
 			&BabeConfiguration {
+				genesis_slot: 0.into(),
 				slot_duration: 10,
 				epoch_length: 4,
 				c: (3, 10),
 				authorities: Vec::new(),
 				randomness: Default::default(),
 				allowed_slots: AllowedSlots::PrimaryAndSecondaryPlainSlots,
+				slot_duration_transition: None,
 			},
 		)
 		.unwrap();
@@ -210,6 +213,6 @@ mod test {
 			client.insert_aux(values, &[]).unwrap();
 		});
 
-		assert_eq!(load_decode::<_, u32>(&client, BABE_EPOCH_CHANGES_VERSION).unwrap(), Some(3));
+		assert_eq!(load_decode::<_, u32>(&client, BABE_EPOCH_CHANGES_VERSION).unwrap(), Some(4));
 	}
 }

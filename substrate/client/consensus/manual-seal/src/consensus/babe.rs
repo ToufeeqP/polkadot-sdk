@@ -293,7 +293,13 @@ where
 				.timestamp_inherent_data()?
 				.ok_or_else(|| Error::StringError("No timestamp inherent data".into()))?;
 
-			let slot = Slot::from_timestamp(timestamp, self.config.slot_duration());
+			let slot = sp_consensus_babe::slot_at_timestamp(
+				timestamp,
+				self.config.genesis_slot,
+				self.config.slot_duration(),
+				self.config.epoch_length,
+				self.config.slot_duration_transition.as_ref(),
+			);
 
 			// manually hard code epoch descriptor
 			epoch_descriptor = match epoch_descriptor {

@@ -452,11 +452,13 @@ impl pallet_timestamp::Config for Runtime {
 
 parameter_types! {
 	pub const EpochDuration: u64 = 6;
+	pub const SlotDurationTransition: Option<sp_consensus_babe::SlotDurationTransition> = None;
 }
 
 impl pallet_babe::Config for Runtime {
 	type EpochDuration = EpochDuration;
 	type ExpectedBlockTime = ConstU64<10_000>;
+	type SlotDurationTransition = SlotDurationTransition;
 	type EpochChangeTrigger = pallet_babe::SameAuthoritiesForever;
 	type DisabledValidators = ();
 	type KeyOwnerProof = sp_core::Void;
@@ -702,6 +704,8 @@ impl_runtime_apis! {
 				authorities: Babe::authorities().to_vec(),
 				randomness: Babe::randomness(),
 				allowed_slots: epoch_config.allowed_slots,
+				genesis_slot: Babe::genesis_slot(),
+				slot_duration_transition: SlotDurationTransition::get(),
 			}
 		}
 

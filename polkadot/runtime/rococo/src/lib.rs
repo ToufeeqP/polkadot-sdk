@@ -370,12 +370,14 @@ impl pallet_preimage::Config for Runtime {
 
 parameter_types! {
 	pub const ExpectedBlockTime: Moment = MILLISECS_PER_BLOCK;
+	pub const SlotDurationTransition: Option<sp_consensus_babe::SlotDurationTransition> = None;
 	pub ReportLongevity: u64 = EpochDurationInBlocks::get() as u64 * 10;
 }
 
 impl pallet_babe::Config for Runtime {
 	type EpochDuration = EpochDurationInBlocks;
 	type ExpectedBlockTime = ExpectedBlockTime;
+	type SlotDurationTransition = SlotDurationTransition;
 	// session module is the trigger
 	type EpochChangeTrigger = pallet_babe::ExternalTrigger;
 	type DisabledValidators = Session;
@@ -2365,6 +2367,8 @@ sp_api::impl_runtime_apis! {
 				authorities: Babe::authorities().to_vec(),
 				randomness: Babe::randomness(),
 				allowed_slots: epoch_config.allowed_slots,
+				genesis_slot: Babe::genesis_slot(),
+				slot_duration_transition: SlotDurationTransition::get(),
 			}
 		}
 

@@ -264,18 +264,22 @@ pub fn new_partial(
 
 	let babe_config = sc_consensus_babe::configuration(&*client)?;
 	let slot_duration = babe_config.slot_duration();
+	let babe_inherent_config = babe_config.clone();
 	let (block_import, babe_link) = sc_consensus_babe::block_import(
 		babe_config,
 		beefy_block_import,
 		client.clone(),
-		Arc::new(move |_, _| async move {
-			let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
-			let slot =
-			sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_slot_duration(
-				*timestamp,
-				slot_duration,
-			);
-			Ok((slot, timestamp))
+		Arc::new(move |_, _| {
+			let babe_inherent_config = babe_inherent_config.clone();
+			async move {
+				let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
+				let slot =
+					sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_config(
+						*timestamp,
+						&babe_inherent_config,
+					);
+				Ok((slot, timestamp))
+			}
 		}) as BabeCreateInherentDataProviders<Block>,
 		select_chain.clone(),
 		OffchainTransactionPoolFactory::new(transaction_pool.clone()),
@@ -604,7 +608,7 @@ pub fn new_full_base<N: NetworkBackend<Block, <Block as BlockT>::Hash>>(
 		);
 
 		let client_clone = client.clone();
-		let slot_duration = babe_link.config().slot_duration();
+		let babe_inherent_config = babe_link.config().clone();
 		let babe_config = sc_consensus_babe::BabeParams {
 			keystore: keystore_container.keystore(),
 			client: client.clone(),
@@ -615,13 +619,14 @@ pub fn new_full_base<N: NetworkBackend<Block, <Block as BlockT>::Hash>>(
 			justification_sync_link: sync_service.clone(),
 			create_inherent_data_providers: move |parent, ()| {
 				let client_clone = client_clone.clone();
+				let babe_inherent_config = babe_inherent_config.clone();
 				async move {
 					let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
 
 					let slot =
-						sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_slot_duration(
+						sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_config(
 							*timestamp,
-							slot_duration,
+							&babe_inherent_config,
 						);
 
 					let storage_proof =

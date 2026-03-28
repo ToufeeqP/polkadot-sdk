@@ -39,6 +39,23 @@ pub struct EpochV0 {
 	pub randomness: Randomness,
 }
 
+/// BABE epoch information, version 1.
+#[derive(Decode, Encode, PartialEq, Eq, Clone, Debug)]
+pub struct EpochV1 {
+	/// The epoch index.
+	pub epoch_index: u64,
+	/// The starting slot of the epoch.
+	pub start_slot: Slot,
+	/// The duration of this epoch.
+	pub duration: u64,
+	/// The authorities and their weights.
+	pub authorities: Vec<(AuthorityId, BabeAuthorityWeight)>,
+	/// Randomness for this epoch.
+	pub randomness: Randomness,
+	/// The epoch configuration.
+	pub config: BabeEpochConfiguration,
+}
+
 impl EpochT for EpochV0 {
 	type NextEpochDescriptor = NextEpochDescriptor;
 	type Slot = Slot;
@@ -66,14 +83,60 @@ impl EpochT for EpochV0 {
 impl EpochV0 {
 	/// Migrate the struct to current epoch version.
 	pub fn migrate(self, config: &BabeConfiguration) -> Epoch {
-		sp_consensus_babe::Epoch {
-			epoch_index: self.epoch_index,
-			start_slot: self.start_slot,
+		Epoch::from_runtime(
+			sp_consensus_babe::Epoch {
+				epoch_index: self.epoch_index,
+				start_slot: self.start_slot,
+				duration: self.duration,
+				authorities: self.authorities,
+				randomness: self.randomness,
+				config: BabeEpochConfiguration { c: config.c, allowed_slots: config.allowed_slots },
+			},
+			config,
+		)
+	}
+}
+
+impl EpochT for EpochV1 {
+	type NextEpochDescriptor = (NextEpochDescriptor, BabeEpochConfiguration);
+	type Slot = Slot;
+
+	fn increment(
+		&self,
+		(descriptor, config): (NextEpochDescriptor, BabeEpochConfiguration),
+	) -> EpochV1 {
+		EpochV1 {
+			epoch_index: self.epoch_index + 1,
+			start_slot: self.start_slot + self.duration,
 			duration: self.duration,
-			authorities: self.authorities,
-			randomness: self.randomness,
-			config: BabeEpochConfiguration { c: config.c, allowed_slots: config.allowed_slots },
+			authorities: descriptor.authorities,
+			randomness: descriptor.randomness,
+			config,
 		}
-		.into()
+	}
+
+	fn start_slot(&self) -> Slot {
+		self.start_slot
+	}
+
+	fn end_slot(&self) -> Slot {
+		self.start_slot + self.duration
+	}
+}
+
+impl EpochV1 {
+	/// Migrate the struct to current epoch version.
+	pub fn migrate(self, config: &BabeConfiguration) -> Epoch {
+		Epoch::from_runtime(
+			sp_consensus_babe::Epoch {
+				epoch_index: self.epoch_index,
+				start_slot: self.start_slot,
+				duration: self.duration,
+				authorities: self.authorities,
+				randomness: self.randomness,
+				config: self.config,
+			},
+			config,
+		)
 	}
 }

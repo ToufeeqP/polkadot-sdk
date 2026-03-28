@@ -11790,6 +11790,7 @@ dependencies = [
  "sp-runtime",
  "sp-session",
  "sp-staking",
+ "sp-timestamp",
  "sp-tracing 19.0.0",
 ]
 

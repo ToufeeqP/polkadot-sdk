@@ -36,7 +36,7 @@ use frame_system::pallet_prelude::{BlockNumberFor, HeaderFor};
 use sp_consensus_babe::{
 	digests::{NextConfigDescriptor, NextEpochDescriptor, PreDigest},
 	AllowedSlots, BabeAuthorityWeight, BabeEpochConfiguration, ConsensusLog, Epoch,
-	EquivocationProof, Randomness as BabeRandomness, Slot, BABE_ENGINE_ID, RANDOMNESS_LENGTH,
+	EquivocationProof, Randomness as BabeRandomness, Slot, SlotDuration, BABE_ENGINE_ID, RANDOMNESS_LENGTH,
 	RANDOMNESS_VRF_CONTEXT,
 };
 use sp_core::crypto::Wraps;
@@ -135,6 +135,10 @@ pub mod pallet {
 		/// the probability of a slot being empty).
 		#[pallet::constant]
 		type ExpectedBlockTime: Get<Self::Moment>;
+
+		/// An optional, coordinated transition to a new slot duration and epoch length.
+		#[pallet::constant]
+		type SlotDurationTransition: Get<Option<sp_consensus_babe::SlotDurationTransition>>;
 
 		/// BABE requires some logic to be triggered on every block to query for whether an epoch
 		/// has ended and to perform the transition to the next epoch.
@@ -566,6 +570,19 @@ impl<T: Config> Pallet<T> {
 		<T as pallet_timestamp::Config>::MinimumPeriod::get().saturating_mul(2u32.into())
 	}
 
+	fn slot_duration_transition() -> Option<sp_consensus_babe::SlotDurationTransition> {
+		T::SlotDurationTransition::get()
+	}
+
+	fn epoch_duration_for(slot: Slot) -> u64 {
+		match Self::slot_duration_transition() {
+			Some(transition)
+				if slot >= transition.starting_slot(GenesisSlot::<T>::get(), T::EpochDuration::get()) =>
+				transition.new_epoch_length,
+			_ => T::EpochDuration::get(),
+		}
+	}
+
 	/// Determine whether an epoch change should take place at this block.
 	/// Assumes that initialization has already taken place.
 	pub fn should_epoch_change(now: BlockNumberFor<T>) -> bool {
@@ -579,7 +596,7 @@ impl<T: Config> Pallet<T> {
 		// so we don't rotate the epoch.
 		now != One::one() && {
 			let diff = CurrentSlot::<T>::get().saturating_sub(Self::current_epoch_start());
-			*diff >= T::EpochDuration::get()
+			*diff >= Self::epoch_duration_for(CurrentSlot::<T>::get())
 		}
 	}
 
@@ -599,7 +616,8 @@ impl<T: Config> Pallet<T> {
 	// WEIGHT NOTE: This function is tied to the weight of `EstimateNextSessionRotation`. If you
 	// update this function, you must also update the corresponding weight.
 	pub fn next_expected_epoch_change(now: BlockNumberFor<T>) -> Option<BlockNumberFor<T>> {
-		let next_slot = Self::current_epoch_start().saturating_add(T::EpochDuration::get());
+		let next_slot =
+			Self::current_epoch_start().saturating_add(Self::epoch_duration_for(CurrentSlot::<T>::get()));
 		next_slot.checked_sub(*CurrentSlot::<T>::get()).map(|slots_remaining| {
 			// This is a best effort guess. Drifts in the slot/block ratio will cause errors here.
 			let blocks_remaining: BlockNumberFor<T> = slots_remaining.saturated_into();
@@ -640,6 +658,7 @@ impl<T: Config> Pallet<T> {
 			CurrentSlot::<T>::get(),
 			GenesisSlot::<T>::get(),
 			T::EpochDuration::get(),
+			Self::slot_duration_transition().as_ref(),
 		);
 
 		let current_epoch_index = EpochIndex::<T>::get();
@@ -725,6 +744,7 @@ impl<T: Config> Pallet<T> {
 			EpochIndex::<T>::get(),
 			GenesisSlot::<T>::get(),
 			T::EpochDuration::get(),
+			Self::slot_duration_transition().as_ref(),
 		)
 	}
 
@@ -733,7 +753,7 @@ impl<T: Config> Pallet<T> {
 		Epoch {
 			epoch_index: EpochIndex::<T>::get(),
 			start_slot: Self::current_epoch_start(),
-			duration: T::EpochDuration::get(),
+			duration: Self::epoch_duration_for(Self::current_epoch_start()),
 			authorities: Authorities::<T>::get().into_inner(),
 			randomness: Randomness::<T>::get(),
 			config: EpochConfig::<T>::get()
@@ -753,12 +773,13 @@ impl<T: Config> Pallet<T> {
 			next_epoch_index,
 			GenesisSlot::<T>::get(),
 			T::EpochDuration::get(),
+			Self::slot_duration_transition().as_ref(),
 		);
 
 		Epoch {
 			epoch_index: next_epoch_index,
 			start_slot,
-			duration: T::EpochDuration::get(),
+			duration: Self::epoch_duration_for(start_slot),
 			authorities: NextAuthorities::<T>::get().into_inner(),
 			randomness: NextRandomness::<T>::get(),
 			config: NextEpochConfig::<T>::get().unwrap_or_else(|| {
@@ -932,8 +953,13 @@ impl<T: Config> OnTimestampSet<T::Moment> for Pallet<T> {
 		let slot_duration = Self::slot_duration();
 		assert!(!slot_duration.is_zero(), "Babe slot duration cannot be zero.");
 
-		let timestamp_slot = moment / slot_duration;
-		let timestamp_slot = Slot::from(timestamp_slot.saturated_into::<u64>());
+		let timestamp_slot = sp_consensus_babe::slot_at_timestamp(
+			sp_timestamp::Timestamp::new(moment.saturated_into()),
+			GenesisSlot::<T>::get(),
+			SlotDuration::from_millis(slot_duration.saturated_into()),
+			T::EpochDuration::get(),
+			Self::slot_duration_transition().as_ref(),
+		);
 
 		assert_eq!(
 			CurrentSlot::<T>::get(),
@@ -947,14 +973,17 @@ impl<T: Config> frame_support::traits::EstimateNextSessionRotation<BlockNumberFo
 	for Pallet<T>
 {
 	fn average_session_length() -> BlockNumberFor<T> {
-		T::EpochDuration::get().saturated_into()
+		Self::epoch_duration_for(CurrentSlot::<T>::get()).saturated_into()
 	}
 
 	fn estimate_current_session_progress(_now: BlockNumberFor<T>) -> (Option<Permill>, Weight) {
 		let elapsed = CurrentSlot::<T>::get().saturating_sub(Self::current_epoch_start()) + 1;
 
 		(
-			Some(Permill::from_rational(*elapsed, T::EpochDuration::get())),
+			Some(Permill::from_rational(
+				*elapsed,
+				Self::epoch_duration_for(CurrentSlot::<T>::get()),
+			)),
 			// Read: Current Slot, Epoch Index, Genesis Slot
 			T::DbWeight::get().reads(3),
 		)

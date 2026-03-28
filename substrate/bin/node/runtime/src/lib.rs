@@ -544,6 +544,7 @@ parameter_types! {
 	//       Attempting to do so will brick block production.
 	pub const EpochDuration: u64 = EPOCH_DURATION_IN_SLOTS;
 	pub const ExpectedBlockTime: Moment = MILLISECS_PER_BLOCK;
+	pub const SlotDurationTransition: Option<sp_consensus_babe::SlotDurationTransition> = None;
 	pub const ReportLongevity: u64 =
 		BondingDuration::get() as u64 * SessionsPerEra::get() as u64 * EpochDuration::get();
 }
@@ -551,6 +552,7 @@ parameter_types! {
 impl pallet_babe::Config for Runtime {
 	type EpochDuration = EpochDuration;
 	type ExpectedBlockTime = ExpectedBlockTime;
+	type SlotDurationTransition = SlotDurationTransition;
 	type EpochChangeTrigger = pallet_babe::ExternalTrigger;
 	type DisabledValidators = Session;
 	type WeightInfo = ();
@@ -3241,6 +3243,8 @@ pallet_revive::impl_runtime_apis_plus_revive!(
 				authorities: Babe::authorities().to_vec(),
 				randomness: Babe::randomness(),
 				allowed_slots: epoch_config.allowed_slots,
+				genesis_slot: Babe::genesis_slot(),
+				slot_duration_transition: SlotDurationTransition::get(),
 			}
 		}
 

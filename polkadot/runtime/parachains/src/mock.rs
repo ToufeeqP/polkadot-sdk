@@ -158,6 +158,7 @@ impl pallet_balances::Config for Test {
 parameter_types! {
 	pub const EpochDuration: u64 = 10;
 	pub const ExpectedBlockTime: Moment = 6_000;
+	pub const SlotDurationTransition: Option<sp_consensus_babe::SlotDurationTransition> = None;
 	pub const ReportLongevity: u64 = 10;
 	pub const MaxAuthorities: u32 = 100_000;
 }
@@ -165,6 +166,7 @@ parameter_types! {
 impl pallet_babe::Config for Test {
 	type EpochDuration = EpochDuration;
 	type ExpectedBlockTime = ExpectedBlockTime;
+	type SlotDurationTransition = SlotDurationTransition;
 
 	// session module is the trigger
 	type EpochChangeTrigger = pallet_babe::ExternalTrigger;

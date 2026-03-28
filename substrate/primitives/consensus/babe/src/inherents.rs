@@ -78,6 +78,23 @@ impl InherentDataProvider {
 		Self { slot }
 	}
 
+	/// Creates the inherent data provider by calculating the slot from the given
+	/// `timestamp` and BABE configuration.
+	pub fn from_timestamp_and_config(
+		timestamp: sp_timestamp::Timestamp,
+		config: &crate::BabeConfiguration,
+	) -> Self {
+		let slot = crate::slot_at_timestamp(
+			timestamp,
+			config.genesis_slot,
+			config.slot_duration(),
+			config.epoch_length,
+			config.slot_duration_transition.as_ref(),
+		);
+
+		Self { slot }
+	}
+
 	/// Returns the `slot` of this inherent data provider.
 	pub fn slot(&self) -> InherentType {
 		self.slot

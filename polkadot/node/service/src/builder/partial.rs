@@ -188,17 +188,22 @@ where
 
 	let babe_config = sc_consensus_babe::configuration(&*client)?;
 	let slot_duration = babe_config.slot_duration();
+	let babe_inherent_config = babe_config.clone();
 	let (block_import, babe_link) = sc_consensus_babe::block_import(
 		babe_config.clone(),
 		beefy_block_import,
 		client.clone(),
-		Arc::new(move |_, _| async move {
-			let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
-			let slot = sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_slot_duration(
-				*timestamp,
-				slot_duration,
-			);
-			Ok((slot, timestamp))
+		Arc::new(move |_, _| {
+			let babe_inherent_config = babe_inherent_config.clone();
+			async move {
+				let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
+				let slot =
+					sp_consensus_babe::inherents::InherentDataProvider::from_timestamp_and_config(
+						*timestamp,
+						&babe_inherent_config,
+					);
+				Ok((slot, timestamp))
+			}
 		}) as BabeCreateInherentDataProviders<Block>,
 		select_chain.clone(),
 		OffchainTransactionPoolFactory::new(transaction_pool.clone()),

@@ -164,7 +164,7 @@ pub struct BabeConfigurationV1 {
 	pub secondary_slots: bool,
 }
 
-impl From<BabeConfigurationV1> for BabeConfiguration {
+impl From<BabeConfigurationV1> for BabeConfigurationV2 {
 	fn from(v1: BabeConfigurationV1) -> Self {
 		Self {
 			slot_duration: v1.slot_duration,
@@ -181,13 +181,50 @@ impl From<BabeConfigurationV1> for BabeConfiguration {
 	}
 }
 
-/// Configuration data used by the BABE consensus engine.
+/// A coordinated transition from one BABE slot duration to another.
+///
+/// This transition must be enacted at an epoch boundary and all nodes must be
+/// upgraded before the transition is reached.
 #[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug, TypeInfo)]
-pub struct BabeConfiguration {
+pub struct SlotDurationTransition {
+	/// The first epoch that uses the new parameters.
+	pub starting_epoch: u64,
+	/// The new slot duration in milliseconds.
+	pub new_slot_duration: u64,
+	/// The new epoch length, expressed in slots.
+	pub new_epoch_length: u64,
+}
+
+impl SlotDurationTransition {
+	/// Convenience method to get the post-fork slot duration as a `SlotDuration`.
+	pub fn slot_duration(&self) -> SlotDuration {
+		SlotDuration::from_millis(self.new_slot_duration)
+	}
+
+	/// Returns the first slot that uses the new parameters.
+	pub fn starting_slot(&self, genesis_slot: Slot, epoch_duration: u64) -> Slot {
+		epoch_start_slot(self.starting_epoch, genesis_slot, epoch_duration, None)
+	}
+
+	/// Returns the unix timestamp, in milliseconds, at which the transition slot starts.
+	pub fn starting_timestamp(
+		&self,
+		genesis_slot: Slot,
+		slot_duration: SlotDuration,
+		epoch_duration: u64,
+	) -> u64 {
+		self.starting_slot(genesis_slot, epoch_duration)
+			.timestamp(slot_duration)
+			.expect("valid slot and slot duration should yield a timestamp; qed")
+			.as_millis()
+	}
+}
+
+/// Configuration data used by the BABE consensus engine prior to api version 3.
+#[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug, TypeInfo)]
+pub struct BabeConfigurationV2 {
 	/// The slot duration in milliseconds for BABE. Currently, only
 	/// the value provided by this type at genesis will be used.
-	///
-	/// Dynamic slot duration may be supported in the future.
 	pub slot_duration: u64,
 
 	/// The duration of epochs in slots.
@@ -211,10 +248,78 @@ pub struct BabeConfiguration {
 	pub allowed_slots: AllowedSlots,
 }
 
+impl From<BabeConfigurationV2> for BabeConfiguration {
+	fn from(v2: BabeConfigurationV2) -> Self {
+		Self {
+			genesis_slot: Slot::from(0),
+			slot_duration: v2.slot_duration,
+			epoch_length: v2.epoch_length,
+			c: v2.c,
+			authorities: v2.authorities,
+			randomness: v2.randomness,
+			allowed_slots: v2.allowed_slots,
+			slot_duration_transition: None,
+		}
+	}
+}
+
+/// Configuration data used by the BABE consensus engine.
+#[derive(Clone, PartialEq, Eq, Encode, Decode, RuntimeDebug, TypeInfo)]
+pub struct BabeConfiguration {
+	/// The BABE genesis slot.
+	pub genesis_slot: Slot,
+
+	/// The slot duration in milliseconds for BABE before any configured transition.
+	pub slot_duration: u64,
+
+	/// The duration of epochs in slots before any configured transition.
+	pub epoch_length: u64,
+
+	/// A constant value that is used in the threshold calculation formula.
+	/// Expressed as a rational where the first member of the tuple is the
+	/// numerator and the second is the denominator. The rational should
+	/// represent a value between 0 and 1.
+	/// In the threshold formula calculation, `1 - c` represents the probability
+	/// of a slot being empty.
+	pub c: (u64, u64),
+
+	/// The authorities
+	pub authorities: Vec<(AuthorityId, BabeAuthorityWeight)>,
+
+	/// The randomness
+	pub randomness: Randomness,
+
+	/// Type of allowed slots.
+	pub allowed_slots: AllowedSlots,
+
+	/// An optional, coordinated transition to a new slot duration and epoch length.
+	pub slot_duration_transition: Option<SlotDurationTransition>,
+}
+
 impl BabeConfiguration {
 	/// Convenience method to get the slot duration as a `SlotDuration` value.
 	pub fn slot_duration(&self) -> SlotDuration {
 		SlotDuration::from_millis(self.slot_duration)
+	}
+
+	/// Returns the slot duration used at `slot`.
+	pub fn slot_duration_at(&self, slot: Slot) -> SlotDuration {
+		match &self.slot_duration_transition {
+			Some(transition)
+				if slot >= transition.starting_slot(self.genesis_slot, self.epoch_length) =>
+				transition.slot_duration(),
+			_ => self.slot_duration(),
+		}
+	}
+
+	/// Returns the epoch length used by the epoch containing `slot`.
+	pub fn epoch_length_at(&self, slot: Slot) -> u64 {
+		match &self.slot_duration_transition {
+			Some(transition)
+				if slot >= transition.starting_slot(self.genesis_slot, self.epoch_length) =>
+				transition.new_epoch_length,
+			_ => self.epoch_length,
+		}
 	}
 }
 
@@ -376,30 +481,85 @@ pub struct Epoch {
 }
 
 /// Returns the epoch index the given slot belongs to.
-pub fn epoch_index(slot: Slot, genesis_slot: Slot, epoch_duration: u64) -> u64 {
-	*slot.saturating_sub(genesis_slot) / epoch_duration
+pub fn epoch_index(
+	slot: Slot,
+	genesis_slot: Slot,
+	epoch_duration: u64,
+	transition: Option<&SlotDurationTransition>,
+) -> u64 {
+	match transition {
+		Some(transition) if slot >= transition.starting_slot(genesis_slot, epoch_duration) =>
+			transition.starting_epoch +
+				(*slot.saturating_sub(transition.starting_slot(genesis_slot, epoch_duration)) /
+					transition.new_epoch_length),
+		_ => *slot.saturating_sub(genesis_slot) / epoch_duration,
+	}
 }
 
 /// Returns the first slot at the given epoch index.
-pub fn epoch_start_slot(epoch_index: u64, genesis_slot: Slot, epoch_duration: u64) -> Slot {
+pub fn epoch_start_slot(
+	epoch_index: u64,
+	genesis_slot: Slot,
+	epoch_duration: u64,
+	transition: Option<&SlotDurationTransition>,
+) -> Slot {
 	// (epoch_index * epoch_duration) + genesis_slot
 
 	const PROOF: &str = "slot number is u64; it should relate in some way to wall clock time; \
 						 if u64 is not enough we should crash for safety; qed.";
 
-	epoch_index
-		.checked_mul(epoch_duration)
-		.and_then(|slot| slot.checked_add(*genesis_slot))
-		.expect(PROOF)
-		.into()
+	match transition {
+		Some(transition) if epoch_index >= transition.starting_epoch => epoch_index
+			.checked_sub(transition.starting_epoch)
+			.and_then(|epochs| epochs.checked_mul(transition.new_epoch_length))
+			.and_then(|slots| {
+				slots.checked_add(*transition.starting_slot(genesis_slot, epoch_duration))
+			})
+			.expect(PROOF)
+			.into(),
+		_ => epoch_index
+			.checked_mul(epoch_duration)
+			.and_then(|slot| slot.checked_add(*genesis_slot))
+			.expect(PROOF)
+			.into(),
+	}
+}
+
+/// Returns the slot at a given timestamp using the configured pre-fork or
+/// post-fork slot duration.
+pub fn slot_at_timestamp(
+	timestamp: sp_timestamp::Timestamp,
+	genesis_slot: Slot,
+	slot_duration: SlotDuration,
+	epoch_duration: u64,
+	transition: Option<&SlotDurationTransition>,
+) -> Slot {
+	match transition {
+		Some(transition)
+			if timestamp.as_millis() >=
+				transition.starting_timestamp(genesis_slot, slot_duration, epoch_duration) =>
+			transition
+			.starting_slot(genesis_slot, epoch_duration)
+			.saturating_add(
+				(timestamp.as_millis().saturating_sub(
+					transition.starting_timestamp(genesis_slot, slot_duration, epoch_duration),
+				)) /
+					transition.new_slot_duration,
+			),
+		_ => Slot::from_timestamp(timestamp, slot_duration),
+	}
 }
 
 sp_api::decl_runtime_apis! {
 	/// API necessary for block authorship with BABE.
-	#[api_version(2)]
+	#[api_version(3)]
 	pub trait BabeApi {
 		/// Return the configuration for BABE.
 		fn configuration() -> BabeConfiguration;
+
+		/// Return the configuration for BABE. Version 2.
+		#[changed_in(3)]
+		fn configuration() -> BabeConfigurationV2;
 
 		/// Return the configuration for BABE. Version 1.
 		#[changed_in(2)]

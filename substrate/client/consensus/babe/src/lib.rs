@@ -160,25 +160,61 @@ const AUTHORING_SCORE_LENGTH: usize = 16;
 
 /// BABE epoch information
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
-pub struct Epoch(sp_consensus_babe::Epoch);
+pub struct Epoch {
+	epoch: sp_consensus_babe::Epoch,
+	genesis_slot: Slot,
+	transition: Option<sp_consensus_babe::SlotDurationTransition>,
+}
 
 impl Deref for Epoch {
 	type Target = sp_consensus_babe::Epoch;
 
 	fn deref(&self) -> &Self::Target {
-		&self.0
+		&self.epoch
 	}
 }
 
 impl DerefMut for Epoch {
 	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.0
+		&mut self.epoch
 	}
 }
 
 impl From<sp_consensus_babe::Epoch> for Epoch {
 	fn from(epoch: sp_consensus_babe::Epoch) -> Self {
-		Epoch(epoch)
+		Self { genesis_slot: epoch.start_slot, epoch, transition: None }
+	}
+}
+
+impl Epoch {
+	pub(crate) fn from_runtime(
+		epoch: sp_consensus_babe::Epoch,
+		config: &BabeConfiguration,
+	) -> Self {
+		let transition = config.slot_duration_transition.clone();
+		let genesis_slot = epoch
+			.start_slot
+			.saturating_sub(sp_consensus_babe::epoch_start_slot(
+				epoch.epoch_index,
+				Slot::from(0),
+				config.epoch_length,
+				transition.as_ref(),
+			));
+
+		Self { epoch, genesis_slot, transition }
+	}
+
+	fn duration_for_epoch(
+		&self,
+		epoch_index: u64,
+		start_slot: Slot,
+		fallback_duration: u64,
+	) -> u64 {
+		match &self.transition {
+			Some(transition) if epoch_index >= transition.starting_epoch =>
+				transition.new_epoch_length,
+			_ => fallback_duration,
+		}
 	}
 }
 
@@ -190,15 +226,22 @@ impl EpochT for Epoch {
 		&self,
 		(descriptor, config): (NextEpochDescriptor, BabeEpochConfiguration),
 	) -> Epoch {
-		sp_consensus_babe::Epoch {
-			epoch_index: self.epoch_index + 1,
-			start_slot: self.start_slot + self.duration,
-			duration: self.duration,
-			authorities: descriptor.authorities,
-			randomness: descriptor.randomness,
-			config,
+		let next_epoch_index = self.epoch_index + 1;
+		let next_start_slot = self.start_slot + self.duration;
+		let next_duration = self.duration_for_epoch(next_epoch_index, next_start_slot, self.duration);
+
+		Epoch {
+			epoch: sp_consensus_babe::Epoch {
+				epoch_index: next_epoch_index,
+				start_slot: next_start_slot,
+				duration: next_duration,
+				authorities: descriptor.authorities,
+				randomness: descriptor.randomness,
+				config,
+			},
+			genesis_slot: self.genesis_slot,
+			transition: self.transition.clone(),
 		}
-		.into()
 	}
 
 	fn start_slot(&self) -> Slot {
@@ -215,18 +258,21 @@ impl Epoch {
 	///
 	/// This is defined to start at the slot of the first block, so that has to be provided.
 	pub fn genesis(genesis_config: &BabeConfiguration, slot: Slot) -> Epoch {
-		sp_consensus_babe::Epoch {
-			epoch_index: 0,
-			start_slot: slot,
-			duration: genesis_config.epoch_length,
-			authorities: genesis_config.authorities.clone(),
-			randomness: genesis_config.randomness,
-			config: BabeEpochConfiguration {
-				c: genesis_config.c,
-				allowed_slots: genesis_config.allowed_slots,
+		Epoch {
+			epoch: sp_consensus_babe::Epoch {
+				epoch_index: 0,
+				start_slot: slot,
+				duration: genesis_config.epoch_length,
+				authorities: genesis_config.authorities.clone(),
+				randomness: genesis_config.randomness,
+				config: BabeEpochConfiguration {
+					c: genesis_config.c,
+					allowed_slots: genesis_config.allowed_slots,
+				},
 			},
+			genesis_slot: slot,
+			transition: genesis_config.slot_duration_transition.clone(),
 		}
-		.into()
 	}
 
 	/// Clone and tweak epoch information to refer to the specified slot.
@@ -237,26 +283,27 @@ impl Epoch {
 	/// The `slot` must be greater than or equal the original epoch start slot,
 	/// if is less this operation is equivalent to a simple clone.
 	pub fn clone_for_slot(&self, slot: Slot) -> Epoch {
+		if slot < self.start_slot {
+			return self.clone()
+		}
+
 		let mut epoch = self.clone();
-
-		let skipped_epochs = *slot.saturating_sub(self.start_slot) / self.duration;
-
-		let epoch_index = epoch.epoch_index.checked_add(skipped_epochs).expect(
-			"epoch number is u64; it should be strictly smaller than number of slots; \
-				slots relate in some way to wall clock time; \
-				if u64 is not enough we should crash for safety; qed.",
+		let epoch_index = sp_consensus_babe::epoch_index(
+			slot,
+			self.genesis_slot,
+			self.duration,
+			self.transition.as_ref(),
+		);
+		let start_slot = sp_consensus_babe::epoch_start_slot(
+			epoch_index,
+			self.genesis_slot,
+			self.duration,
+			self.transition.as_ref(),
 		);
 
-		let start_slot = skipped_epochs
-			.checked_mul(epoch.duration)
-			.and_then(|skipped_slots| epoch.start_slot.checked_add(skipped_slots))
-			.expect(
-				"slot number is u64; it should relate in some way to wall clock time; \
-				 if u64 is not enough we should crash for safety; qed.",
-			);
-
-		epoch.epoch_index = epoch_index;
-		epoch.start_slot = Slot::from(start_slot);
+		epoch.epoch.epoch_index = epoch_index;
+		epoch.epoch.start_slot = start_slot;
+		epoch.epoch.duration = epoch.duration_for_epoch(epoch_index, start_slot, self.duration);
 
 		epoch
 	}
@@ -397,10 +444,24 @@ where
 		Some(1) => {
 			#[allow(deprecated)]
 			{
-				runtime_api.configuration_before_version_2(at_hash)?.into()
+				let legacy: sp_consensus_babe::BabeConfigurationV1 =
+					runtime_api.configuration_before_version_2(at_hash)?;
+				sp_consensus_babe::BabeConfigurationV2::from(legacy).into()
 			}
 		},
-		Some(2) => runtime_api.configuration(at_hash)?,
+		Some(2) => {
+			let current = runtime_api.configuration(at_hash)?;
+			sp_consensus_babe::BabeConfigurationV2 {
+				slot_duration: current.slot_duration,
+				epoch_length: current.epoch_length,
+				c: current.c,
+				authorities: current.authorities,
+				randomness: current.randomness,
+				allowed_slots: current.allowed_slots,
+			}
+			.into()
+		},
+		Some(3) => runtime_api.configuration(at_hash)?,
 		_ =>
 			return Err(sp_blockchain::Error::VersionInvalid(
 				"Unsupported or invalid BabeApi version".to_string(),
@@ -1028,7 +1089,13 @@ where
 			block.header.digest().logs().len()
 		);
 
-		let slot_now = Slot::from_timestamp(Timestamp::current(), self.slot_duration);
+		let slot_now = sp_consensus_babe::slot_at_timestamp(
+			Timestamp::current(),
+			self.config.genesis_slot,
+			self.slot_duration,
+			self.config.epoch_length,
+			self.config.slot_duration_transition.as_ref(),
+		);
 
 		let pre_digest = find_pre_digest::<Block>(&block.header)?;
 		let (check_header, epoch_descriptor) = {
@@ -1221,7 +1288,13 @@ where
 		})?;
 
 		let mut epoch_changes = self.epoch_changes.shared_data_locked();
-		epoch_changes.reset(parent_hash, hash, number, current_epoch.into(), next_epoch.into());
+		epoch_changes.reset(
+			parent_hash,
+			hash,
+			number,
+			Epoch::from_runtime(current_epoch, &self.config),
+			Epoch::from_runtime(next_epoch, &self.config),
+		);
 		aux_schema::write_epoch_changes::<Block, _, _>(&*epoch_changes, |insert| {
 			self.client.insert_aux(insert, [])
 		})

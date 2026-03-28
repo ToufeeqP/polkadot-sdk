@@ -221,6 +221,7 @@ where
 parameter_types! {
 	pub storage EpochDuration: u64 = EPOCH_DURATION_IN_SLOTS as u64;
 	pub storage ExpectedBlockTime: Moment = MILLISECS_PER_BLOCK;
+	pub storage SlotDurationTransition: Option<sp_consensus_babe::SlotDurationTransition> = None;
 	pub ReportLongevity: u64 =
 		BondingDuration::get() as u64 * SessionsPerEra::get() as u64 * EpochDuration::get();
 }
@@ -228,6 +229,7 @@ parameter_types! {
 impl pallet_babe::Config for Runtime {
 	type EpochDuration = EpochDuration;
 	type ExpectedBlockTime = ExpectedBlockTime;
+	type SlotDurationTransition = SlotDurationTransition;
 
 	// session module is the trigger
 	type EpochChangeTrigger = pallet_babe::ExternalTrigger;
@@ -1270,6 +1272,8 @@ sp_api::impl_runtime_apis! {
 				authorities: Babe::authorities().to_vec(),
 				randomness: Babe::randomness(),
 				allowed_slots: epoch_config.allowed_slots,
+				genesis_slot: Babe::genesis_slot(),
+				slot_duration_transition: SlotDurationTransition::get(),
 			}
 		}
 
