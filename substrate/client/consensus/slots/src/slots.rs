@@ -90,7 +90,6 @@ impl<B: BlockT> SlotInfo<B> {
 pub(crate) struct Slots<Block, SC, IDP, SO, SD> {
 	last_slot: Slot,
 	slot_duration: SD,
-	until_next_slot: Option<Delay>,
 	create_inherent_data_providers: IDP,
 	select_chain: SC,
 	sync_oracle: SO,
@@ -130,7 +129,6 @@ where
 		Slots {
 			last_slot: 0.into(),
 			slot_duration,
-			until_next_slot: None,
 			create_inherent_data_providers,
 			select_chain,
 			sync_oracle,
@@ -153,20 +151,9 @@ where
 		loop {
 			let slot_duration = (self.slot_duration)();
 
-			// Wait for slot timeout
-			self.until_next_slot
-				.take()
-				.unwrap_or_else(|| {
-					// Schedule first timeout.
-					let wait_dur = time_until_next_slot(slot_duration);
-					Delay::new(wait_dur)
-				})
-				.await;
-
-			// Schedule delay for next slot.
 			let slot_duration = (self.slot_duration)();
 			let wait_dur = time_until_next_slot(slot_duration);
-			self.until_next_slot = Some(Delay::new(wait_dur));
+			Delay::new(wait_dur).await;
 
 			if self.sync_oracle.is_major_syncing() {
 				log::debug!(target: LOG_TARGET, "Skipping slot: major sync is in progress.");

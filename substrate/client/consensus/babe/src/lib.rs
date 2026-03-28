@@ -1813,8 +1813,28 @@ where
 
 		let import_result = self.inner.import_block(block).await;
 		if import_result.is_ok() {
+			let old_config = self.config.read().clone();
 			refresh_config_at::<Block, _>(self.client.as_ref(), hash, &self.config)
 				.map_err(|e| ConsensusError::ClientImport(e.to_string()))?;
+			let new_config = self.config.read().clone();
+
+			if old_config != new_config {
+				let current_epoch = self.client.runtime_api().current_epoch(hash).map_err(|e| {
+					ConsensusError::ClientImport(babe_err::<Block>(Error::RuntimeApi(e)).into())
+				})?;
+				let next_epoch = self.client.runtime_api().next_epoch(hash).map_err(|e| {
+					ConsensusError::ClientImport(babe_err::<Block>(Error::RuntimeApi(e)).into())
+				})?;
+
+				let mut epoch_changes = self.epoch_changes.shared_data_locked();
+				epoch_changes.reset(
+					parent_hash,
+					hash,
+					number,
+					Epoch::from_runtime(current_epoch, &new_config),
+					Epoch::from_runtime(next_epoch, &new_config),
+				);
+			}
 		}
 
 		// revert to the original epoch changes in case there's an error
