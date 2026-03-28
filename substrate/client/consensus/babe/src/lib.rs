@@ -457,11 +457,14 @@ where
 	C: AuxStore + ProvideRuntimeApi<B> + UsageProvider<B>,
 	C::Api: BabeApi<B>,
 {
-	let at_hash = if client.usage_info().chain.finalized_state.is_some() {
-		client.usage_info().chain.best_hash
+	let usage = client.usage_info();
+	let at_hash = if usage.chain.best_hash == usage.chain.genesis_hash &&
+		usage.chain.best_number == Zero::zero()
+	{
+		debug!(target: LOG_TARGET, "Reading BABE config from genesis");
+		usage.chain.genesis_hash
 	} else {
-		debug!(target: LOG_TARGET, "No finalized state is available. Reading config from genesis");
-		client.usage_info().chain.genesis_hash
+		usage.chain.best_hash
 	};
 
 	configuration_at(client, at_hash)
