@@ -595,8 +595,9 @@ impl<T: Config> Pallet<T> {
 		// the same randomness and validator set as signalled in the genesis,
 		// so we don't rotate the epoch.
 		now != One::one() && {
-			let diff = CurrentSlot::<T>::get().saturating_sub(Self::current_epoch_start());
-			*diff >= Self::epoch_duration_for(CurrentSlot::<T>::get())
+			let current_epoch_start = Self::current_epoch_start();
+			let diff = CurrentSlot::<T>::get().saturating_sub(current_epoch_start);
+			*diff >= Self::epoch_duration_for(current_epoch_start)
 		}
 	}
 
@@ -616,8 +617,9 @@ impl<T: Config> Pallet<T> {
 	// WEIGHT NOTE: This function is tied to the weight of `EstimateNextSessionRotation`. If you
 	// update this function, you must also update the corresponding weight.
 	pub fn next_expected_epoch_change(now: BlockNumberFor<T>) -> Option<BlockNumberFor<T>> {
+		let current_epoch_start = Self::current_epoch_start();
 		let next_slot =
-			Self::current_epoch_start().saturating_add(Self::epoch_duration_for(CurrentSlot::<T>::get()));
+			current_epoch_start.saturating_add(Self::epoch_duration_for(current_epoch_start));
 		next_slot.checked_sub(*CurrentSlot::<T>::get()).map(|slots_remaining| {
 			// This is a best effort guess. Drifts in the slot/block ratio will cause errors here.
 			let blocks_remaining: BlockNumberFor<T> = slots_remaining.saturated_into();
@@ -973,16 +975,17 @@ impl<T: Config> frame_support::traits::EstimateNextSessionRotation<BlockNumberFo
 	for Pallet<T>
 {
 	fn average_session_length() -> BlockNumberFor<T> {
-		Self::epoch_duration_for(CurrentSlot::<T>::get()).saturated_into()
+		Self::epoch_duration_for(Self::current_epoch_start()).saturated_into()
 	}
 
 	fn estimate_current_session_progress(_now: BlockNumberFor<T>) -> (Option<Permill>, Weight) {
-		let elapsed = CurrentSlot::<T>::get().saturating_sub(Self::current_epoch_start()) + 1;
+		let current_epoch_start = Self::current_epoch_start();
+		let elapsed = CurrentSlot::<T>::get().saturating_sub(current_epoch_start) + 1;
 
 		(
 			Some(Permill::from_rational(
 				*elapsed,
-				Self::epoch_duration_for(CurrentSlot::<T>::get()),
+				Self::epoch_duration_for(current_epoch_start),
 			)),
 			// Read: Current Slot, Epoch Index, Genesis Slot
 			T::DbWeight::get().reads(3),
