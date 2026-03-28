@@ -570,7 +570,7 @@ impl<T: Config> Pallet<T> {
 		<T as pallet_timestamp::Config>::MinimumPeriod::get().saturating_mul(2u32.into())
 	}
 
-	fn slot_duration_transition() -> Option<sp_consensus_babe::SlotDurationTransition> {
+	pub fn slot_duration_transition() -> Option<sp_consensus_babe::SlotDurationTransition> {
 		T::SlotDurationTransition::get()
 	}
 
