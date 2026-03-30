@@ -1895,6 +1895,56 @@ where
 	Ok(())
 }
 
+fn bootstrap_epoch_changes_from_runtime<Block, Client>(
+	client: &Client,
+	config: &SharedBabeConfiguration,
+	epoch_changes: &SharedEpochChanges<Block, Epoch>,
+) -> Result<(), ConsensusError>
+where
+	Block: BlockT,
+	Client: AuxStore
+		+ HeaderBackend<Block>
+		+ HeaderMetadata<Block, Error = sp_blockchain::Error>
+		+ ProvideRuntimeApi<Block>,
+	Client::Api: BabeApi<Block>,
+{
+	let info = client.info();
+	if info.best_number == Zero::zero() {
+		return Ok(())
+	}
+
+	let best_hash = info.best_hash;
+	let best_header = client
+		.header(best_hash)
+		.map_err(|e| ConsensusError::ClientImport(e.to_string()))?
+		.ok_or_else(|| ConsensusError::ClientImport("Best header not found".to_string()))?;
+
+	let current_epoch = client.runtime_api().current_epoch(best_hash).map_err(|e| {
+		ConsensusError::ClientImport(babe_err::<Block>(Error::RuntimeApi(e)).into())
+	})?;
+	let next_epoch = client.runtime_api().next_epoch(best_hash).map_err(|e| {
+		ConsensusError::ClientImport(babe_err::<Block>(Error::RuntimeApi(e)).into())
+	})?;
+	let config = config.read().clone();
+
+	{
+		let mut epoch_changes = epoch_changes.shared_data_locked();
+		epoch_changes.reset(
+			*best_header.parent_hash(),
+			best_hash,
+			info.best_number,
+			Epoch::from_runtime(current_epoch, &config),
+			Epoch::from_runtime(next_epoch, &config),
+		);
+		aux_schema::write_epoch_changes::<Block, _, _>(&*epoch_changes, |insert| {
+			client.insert_aux(insert, [])
+		})
+		.map_err(|e| ConsensusError::ClientImport(e.to_string()))?;
+	}
+
+	Ok(())
+}
+
 /// Produce a BABE block-import object to be used later on in the construction of
 /// an import-queue.
 ///
@@ -1912,8 +1962,10 @@ where
 	Client: AuxStore
 		+ HeaderBackend<Block>
 		+ HeaderMetadata<Block, Error = sp_blockchain::Error>
+		+ ProvideRuntimeApi<Block>
 		+ PreCommitActions<Block>
 		+ 'static,
+	Client::Api: BabeApi<Block>,
 {
 	let epoch_changes = aux_schema::load_epoch_changes::<Block, _>(&*client, &config)?;
 	let config = Arc::new(RwLock::new(config));
@@ -1923,6 +1975,7 @@ where
 	// epoch tree it is useful as a migration, so that nodes prune long trees on
 	// startup rather than waiting until importing the next epoch change block.
 	prune_finalized(client.clone(), &mut epoch_changes.shared_data())?;
+	bootstrap_epoch_changes_from_runtime(client.as_ref(), &config, &epoch_changes)?;
 
 	let client_weak = Arc::downgrade(&client);
 	let on_finality = move |summary: &FinalityNotification<Block>| {
