@@ -87,6 +87,8 @@ pub struct IncomingBlock<B: BlockT> {
 	pub origin: Option<RuntimeOrigin>,
 	/// Allow importing the block skipping state verification if parent state is missing.
 	pub allow_missing_state: bool,
+	/// Allow importing the block even if the parent header is missing locally (To be used by lightclient).
+	pub allow_missing_parent: bool,
 	/// Skip block execution and state verification.
 	pub skip_execution: bool,
 	/// Re-validate existing block.
@@ -341,7 +343,7 @@ pub(crate) async fn verify_single_block_metered<B: BlockT, V: Verifier<B>>(
 				parent_hash,
 				allow_missing_state: block.allow_missing_state,
 				import_existing: block.import_existing,
-				allow_missing_parent: block.state.is_some(),
+				allow_missing_parent: block.allow_missing_parent || block.state.is_some(),
 			})
 			.await,
 	)? {

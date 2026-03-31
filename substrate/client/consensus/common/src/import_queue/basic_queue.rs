@@ -623,6 +623,7 @@ mod tests {
 						justifications: None,
 						origin: None,
 						allow_missing_state: false,
+						allow_missing_parent: false,
 						import_existing: false,
 						state: None,
 						skip_execution: false,

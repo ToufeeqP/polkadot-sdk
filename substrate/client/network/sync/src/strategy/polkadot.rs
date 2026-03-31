@@ -35,10 +35,12 @@ use crate::{
 use log::{debug, error, info, warn};
 use prometheus_endpoint::Registry;
 use sc_client_api::{BlockBackend, ProofProvider};
+use sc_consensus::IncomingBlock;
 use sc_consensus::{BlockImportError, BlockImportStatus};
 use sc_network::ProtocolName;
 use sc_network_common::sync::{message::BlockAnnounce, SyncMode};
 use sc_network_types::PeerId;
+use sp_consensus::BlockOrigin;
 use sp_blockchain::{Error as ClientError, HeaderBackend, HeaderMetadata};
 use sp_runtime::traits::{Block as BlockT, Header, NumberFor};
 use std::{any::Any, collections::HashMap, sync::Arc};
@@ -91,6 +93,10 @@ pub struct PolkadotSyncingStrategy<B: BlockT, Client> {
 	/// Connected peers and their best blocks used to seed a new strategy when switching to it in
 	/// `PolkadotSyncingStrategy::proceed_to_next`.
 	peer_best_blocks: HashMap<PeerId, (B::Hash, NumberFor<B>)>,
+	/// One-shot bootstrap block import used by `AvailLight` after warp sync.
+	pending_bootstrap_block: Option<IncomingBlock<B>>,
+	/// Hash of the bootstrap block while we are waiting for the import result.
+	pending_bootstrap_hash: Option<B::Hash>,
 }
 
 impl<B: BlockT, Client> SyncingStrategy<B> for PolkadotSyncingStrategy<B, Client>
@@ -247,7 +253,69 @@ where
 		results: Vec<(Result<BlockImportStatus<NumberFor<B>>, BlockImportError>, B::Hash)>,
 	) {
 		// Only `StateStrategy` and `ChainSync` are interested in block processing notifications.
-		if let Some(ref mut state) = self.state {
+		if let Some(expected_hash) = self.pending_bootstrap_hash {
+			let mut results = results
+				.into_iter()
+				.filter(|(_, hash)| *hash == expected_hash)
+				.collect::<Vec<_>>();
+
+			if let Some((result, _)) = results.pop() {
+				self.pending_bootstrap_hash = None;
+
+				match result {
+					Ok(_) => {
+						let chain_sync = match ChainSync::new(
+							chain_sync_mode(self.config.mode),
+							self.client.clone(),
+							self.config.max_parallel_downloads,
+							self.config.max_blocks_per_request,
+							self.config.state_request_protocol_name.clone(),
+							self.config.block_downloader.clone(),
+							self.config.metrics_registry.as_ref(),
+							self.peer_best_blocks.iter().map(|(peer_id, (best_hash, best_number))| {
+								(*peer_id, *best_hash, *best_number)
+							}),
+						) {
+							Ok(chain_sync) => chain_sync,
+							Err(e) => {
+								error!(target: LOG_TARGET, "Failed to start `ChainSync`.");
+								error!(target: LOG_TARGET, "{e}");
+								return
+							},
+						};
+
+						self.chain_sync = Some(chain_sync);
+					},
+					Err(err) => {
+						error!(
+							target: LOG_TARGET,
+							"Failed to import warp bootstrap target for avail light: {err:?}.",
+						);
+						let chain_sync = match ChainSync::new(
+							chain_sync_mode(self.config.mode),
+							self.client.clone(),
+							self.config.max_parallel_downloads,
+							self.config.max_blocks_per_request,
+							self.config.state_request_protocol_name.clone(),
+							self.config.block_downloader.clone(),
+							self.config.metrics_registry.as_ref(),
+							self.peer_best_blocks.iter().map(|(peer_id, (best_hash, best_number))| {
+								(*peer_id, *best_hash, *best_number)
+							}),
+						) {
+							Ok(chain_sync) => chain_sync,
+							Err(e) => {
+								error!(target: LOG_TARGET, "Failed to start `ChainSync`.");
+								error!(target: LOG_TARGET, "{e}");
+								return
+							},
+						};
+
+						self.chain_sync = Some(chain_sync);
+					},
+				}
+			}
+		} else if let Some(ref mut state) = self.state {
 			state.on_blocks_processed(imported, count, results);
 		} else if let Some(ref mut chain_sync) = self.chain_sync {
 			chain_sync.on_blocks_processed(imported, count, results);
@@ -317,6 +385,12 @@ where
 			state.actions(network_service).map(Into::into).collect()
 		} else if let Some(ref mut chain_sync) = self.chain_sync {
 			chain_sync.actions(network_service)?
+		} else if let Some(block) = self.pending_bootstrap_block.take() {
+			self.pending_bootstrap_hash = Some(block.hash);
+			vec![SyncingAction::ImportBlocks {
+				origin: BlockOrigin::NetworkInitialSync,
+				blocks: vec![block],
+			}]
 		} else {
 			unreachable!("At least one syncing strategy is always active; qed")
 		};
@@ -377,6 +451,8 @@ where
 				state: None,
 				chain_sync: None,
 				peer_best_blocks: Default::default(),
+				pending_bootstrap_block: None,
+				pending_bootstrap_hash: None,
 			})
 		} else {
 			let chain_sync = ChainSync::new(
@@ -396,6 +472,8 @@ where
 				state: None,
 				chain_sync: Some(chain_sync),
 				peer_best_blocks: Default::default(),
+				pending_bootstrap_block: None,
+				pending_bootstrap_hash: None,
 			})
 		}
 	}
@@ -406,6 +484,30 @@ where
 		if let Some(ref mut warp) = self.warp {
 			match warp.take_result() {
 				Some(res) => {
+					if matches!(self.config.mode, SyncMode::AvailLight) {
+						info!(
+							target: LOG_TARGET,
+							"Warp sync is complete, importing avail-light bootstrap target."
+						);
+
+						let hash = res.target_header.hash();
+						self.warp = None;
+						self.pending_bootstrap_block = Some(IncomingBlock {
+							hash,
+							header: Some(res.target_header),
+							body: res.target_body,
+							indexed_body: None,
+							justifications: res.target_justifications,
+							origin: None,
+							allow_missing_state: true,
+							allow_missing_parent: true,
+							skip_execution: true,
+							import_existing: false,
+							state: None,
+						});
+						return Ok(())
+					}
+
 					info!(
 						target: LOG_TARGET,
 						"Warp sync is complete, continuing with state sync."

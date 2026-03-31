@@ -169,6 +169,7 @@ fn import_block_to_queue<TBl, TImpQu>(
 			justifications: signed_block.justifications,
 			origin: None,
 			allow_missing_state: false,
+			allow_missing_parent: false,
 			import_existing: force,
 			state: None,
 			skip_execution: false,

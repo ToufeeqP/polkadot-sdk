@@ -227,6 +227,8 @@ impl<B: BlockT> StateStrategy<B> {
 					justifications,
 					origin: None,
 					allow_missing_state: true,
+					// this was already teh case before as we were checking if block.state.is_some(), now just making it explicit
+					allow_missing_parent: true,
 					import_existing: true,
 					skip_execution: true,
 					state: Some(state),
@@ -736,6 +738,7 @@ mod test {
 			justifications,
 			origin: None,
 			allow_missing_state: true,
+			allow_missing_parent: false,
 			import_existing: true,
 			skip_execution: true,
 			state: Some(state),

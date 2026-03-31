@@ -417,6 +417,7 @@ where
 					// We are still in warp sync, so we don't have the state. This means
 					// we also can't execute the block.
 					allow_missing_state: true,
+					allow_missing_parent: false,
 					skip_execution: true,
 					// Shouldn't already exist in the database.
 					import_existing: false,
