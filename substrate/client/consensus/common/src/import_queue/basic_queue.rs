@@ -624,6 +624,7 @@ mod tests {
 						origin: None,
 						allow_missing_state: false,
 						allow_missing_parent: false,
+						sparse_bootstrap_import: false,
 						import_existing: false,
 						state: None,
 						skip_execution: false,

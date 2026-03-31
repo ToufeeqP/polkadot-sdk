@@ -170,6 +170,7 @@ fn import_block_to_queue<TBl, TImpQu>(
 			origin: None,
 			allow_missing_state: false,
 			allow_missing_parent: false,
+			sparse_bootstrap_import: false,
 			import_existing: force,
 			state: None,
 			skip_execution: false,

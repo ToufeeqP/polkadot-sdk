@@ -89,6 +89,9 @@ pub struct IncomingBlock<B: BlockT> {
 	pub allow_missing_state: bool,
 	/// Allow importing the block even if the parent header is missing locally (To be used by lightclient).
 	pub allow_missing_parent: bool,
+	/// Marks a sparse bootstrap import that intentionally starts from a verified non-sequential
+	/// block.
+	pub sparse_bootstrap_import: bool,
 	/// Skip block execution and state verification.
 	pub skip_execution: bool,
 	/// Re-validate existing block.
@@ -362,6 +365,7 @@ pub(crate) async fn verify_single_block_metered<B: BlockT, V: Verifier<B>>(
 	import_block.post_hash = Some(hash);
 	import_block.import_existing = block.import_existing;
 	import_block.allow_missing_parent = block.allow_missing_parent;
+	import_block.sparse_bootstrap_import = block.sparse_bootstrap_import;
 	import_block.indexed_body = block.indexed_body;
 
 	if let Some(state) = block.state {

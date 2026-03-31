@@ -236,6 +236,9 @@ pub trait BlockImportOperation<Block: BlockT> {
 
 	/// Configure whether to create a block gap if newly imported block is missing parent
 	fn set_create_gap(&mut self, create_gap: bool);
+
+	/// Mark this operation as an explicit sparse bootstrap import.
+	fn set_sparse_bootstrap_import(&mut self, sparse_bootstrap_import: bool);
 }
 
 /// Interface for performing operations on the backend.

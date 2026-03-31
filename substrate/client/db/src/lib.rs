@@ -839,6 +839,7 @@ pub struct BlockImportOperation<Block: BlockT> {
 	set_head: Option<Block::Hash>,
 	commit_state: bool,
 	create_gap: bool,
+	sparse_bootstrap_import: bool,
 	index_ops: Vec<IndexOperation>,
 }
 
@@ -996,6 +997,10 @@ impl<Block: BlockT> sc_client_api::backend::BlockImportOperation<Block>
 
 	fn set_create_gap(&mut self, create_gap: bool) {
 		self.create_gap = create_gap;
+	}
+
+	fn set_sparse_bootstrap_import(&mut self, sparse_bootstrap_import: bool) {
+		self.sparse_bootstrap_import = sparse_bootstrap_import;
 	}
 }
 
@@ -1675,8 +1680,13 @@ impl<Block: BlockT> Backend<Block> {
 					true,
 				)?;
 			} else {
-				// canonicalize blocks which are old enough, regardless of finality.
-				self.force_delayed_canonicalize(&mut transaction)?
+				// Explicit sparse bootstrap imports intentionally start from a verified high block
+				// and fill the ancestry later. Delayed canonicalization must wait for those imports
+				// only; normal full-node/validator sync should keep the existing behavior.
+				if !operation.sparse_bootstrap_import {
+					// canonicalize blocks which are old enough, regardless of finality.
+					self.force_delayed_canonicalize(&mut transaction)?
+				}
 			}
 
 			if !existing_header {
@@ -2148,6 +2158,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 			set_head: None,
 			commit_state: false,
 			create_gap: true,
+			sparse_bootstrap_import: false,
 			index_ops: Default::default(),
 		})
 	}

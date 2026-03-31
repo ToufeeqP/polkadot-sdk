@@ -479,6 +479,7 @@ where
 			intermediates,
 			import_existing,
 			create_gap,
+			sparse_bootstrap_import,
 			..
 		} = import_block;
 
@@ -504,6 +505,9 @@ where
 		*self.importing_block.write() = Some(hash);
 
 		operation.op.set_create_gap(create_gap);
+		operation
+			.op
+			.set_sparse_bootstrap_import(sparse_bootstrap_import);
 
 		let result = self.execute_and_import_block(
 			operation,

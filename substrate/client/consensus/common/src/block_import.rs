@@ -230,6 +230,9 @@ pub struct BlockImportParams<Block: BlockT> {
 	pub import_existing: bool,
 	/// Allow importing the block if parent block is missing.
 	pub allow_missing_parent: bool,
+	/// Marks a sparse bootstrap import that intentionally starts from a verified non-sequential
+	/// block and must not trigger normal best-chain canonicalization assumptions yet.
+	pub sparse_bootstrap_import: bool,
 	/// Whether to create "block gap" in case this block doesn't have parent.
 	pub create_gap: bool,
 	/// Cached full header hash (with post-digests applied).
@@ -253,6 +256,7 @@ impl<Block: BlockT> BlockImportParams<Block> {
 			fork_choice: None,
 			import_existing: false,
 			allow_missing_parent: false,
+			sparse_bootstrap_import: false,
 			create_gap: true,
 			post_hash: None,
 		}

@@ -552,6 +552,7 @@ where
 							origin: None,
 							allow_missing_state: true,
 							allow_missing_parent: true,
+							sparse_bootstrap_import: true,
 							skip_execution: true,
 							import_existing: false,
 							state: None,

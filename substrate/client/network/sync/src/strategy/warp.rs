@@ -418,6 +418,7 @@ where
 					// we also can't execute the block.
 					allow_missing_state: true,
 					allow_missing_parent: false,
+					sparse_bootstrap_import: false,
 					skip_execution: true,
 					// Shouldn't already exist in the database.
 					import_existing: false,
@@ -1335,6 +1336,8 @@ mod test {
 				justifications: Some(justifications),
 				origin: Some(request_peer_id),
 				allow_missing_state: true,
+				allow_missing_parent: false,
+				sparse_bootstrap_import: false,
 				skip_execution: true,
 				import_existing: false,
 				state: None,
@@ -1419,6 +1422,8 @@ mod test {
 				justifications: Some(justifications),
 				origin: Some(request_peer_id),
 				allow_missing_state: true,
+				allow_missing_parent: false,
+				sparse_bootstrap_import: false,
 				skip_execution: true,
 				import_existing: false,
 				state: None,

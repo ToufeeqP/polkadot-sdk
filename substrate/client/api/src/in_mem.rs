@@ -586,6 +586,8 @@ impl<Block: BlockT> backend::BlockImportOperation<Block> for BlockImportOperatio
 	}
 
 	fn set_create_gap(&mut self, _create_gap: bool) {}
+
+	fn set_sparse_bootstrap_import(&mut self, _sparse_bootstrap_import: bool) {}
 }
 
 /// In-memory backend. Keeps all states and blocks in memory.
