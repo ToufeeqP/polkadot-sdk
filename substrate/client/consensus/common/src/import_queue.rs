@@ -377,7 +377,7 @@ pub(crate) async fn verify_single_block_metered<B: BlockT, V: Verifier<B>>(
 		import_block.state_action = StateAction::ExecuteIfPossible;
 	}
 
-	let import_block = verifier.verify(import_block).await.map_err(|msg| {
+	let mut import_block = verifier.verify(import_block).await.map_err(|msg| {
 		if let Some(ref peer) = peer {
 			trace!(
 				target: LOG_TARGET,
@@ -395,6 +395,13 @@ pub(crate) async fn verify_single_block_metered<B: BlockT, V: Verifier<B>>(
 		}
 		BlockImportError::VerificationFailed(peer, msg)
 	})?;
+
+	if import_block.sparse_bootstrap_import {
+		// Sparse bootstrap imports intentionally start from a verified high block and fill the
+		// ancestry later. They must not become the best block during this one-shot import, even if
+		// the verifier defaults the fork choice to `LongestChain`.
+		import_block.fork_choice = Some(crate::block_import::ForkChoiceStrategy::Custom(false));
+	}
 
 	let verification_time = started.elapsed();
 	if let Some(metrics) = metrics {
