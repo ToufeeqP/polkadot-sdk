@@ -139,8 +139,10 @@ where
 		} else if let Some(ref mut chain_sync) = self.chain_sync {
 			chain_sync.on_validated_block_announce(is_best, peer_id, announce)
 		} else {
-			error!(target: LOG_TARGET, "No syncing strategy is active.");
-			debug_assert!(false);
+			// `AvailLight` can briefly be between strategies while the warp bootstrap target is
+			// handed off for import and the follow-up `ChainSync` instance is not created yet.
+			// Keep tracking peer best blocks, but do not treat this as a fatal state.
+			debug!(target: LOG_TARGET, "No syncing strategy is active.");
 			Some((announce.header.hash(), *announce.header.number()))
 		};
 
@@ -394,7 +396,15 @@ where
 		} else if let Some(ref chain_sync) = self.chain_sync {
 			chain_sync.status()
 		} else {
-			unreachable!("At least one syncing strategy is always active; qed")
+			SyncStatus {
+				state: crate::types::SyncState::Idle,
+				best_seen_block: None,
+				num_peers: self.peer_best_blocks.len() as u32,
+				num_connected_peers: 0,
+				queued_blocks: 0,
+				state_sync: None,
+				warp_sync: None,
+			}
 		}
 	}
 
@@ -426,8 +436,14 @@ where
 				origin: BlockOrigin::NetworkInitialSync,
 				blocks: vec![block],
 			}]
+		} else if self.pending_bootstrap_hash.is_some() {
+			Vec::new()
 		} else {
-			unreachable!("At least one syncing strategy is always active; qed")
+			debug!(
+				target: LOG_TARGET,
+				"No syncing strategy is active while waiting for the next handoff."
+			);
+			Vec::new()
 		};
 
 		if actions.iter().any(SyncingAction::is_finished) {
