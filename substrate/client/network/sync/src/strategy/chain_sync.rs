@@ -1765,13 +1765,21 @@ where
 		}
 
 		if let Some(BlockGap { start, end, .. }) = info.block_gap {
-			let old_gap = self.gap_sync.take().map(|g| (g.best_queued_number, g.target));
-			debug!(target: LOG_TARGET, "Starting gap sync #{start} - #{end} (old gap best and target: {old_gap:?})");
-			self.gap_sync = Some(GapSync {
-				best_queued_number: start - One::one(),
-				target: end,
-				blocks: BlockCollection::new(),
-			});
+			if matches!(self.mode, ChainSyncMode::AvailLight) {
+				debug!(
+					target: LOG_TARGET,
+					"Ignoring block gap #{start} - #{end} for avail-light live sync."
+				);
+				self.gap_sync = None;
+			} else {
+				let old_gap = self.gap_sync.take().map(|g| (g.best_queued_number, g.target));
+				debug!(target: LOG_TARGET, "Starting gap sync #{start} - #{end} (old gap best and target: {old_gap:?})");
+				self.gap_sync = Some(GapSync {
+					best_queued_number: start - One::one(),
+					target: end,
+					blocks: BlockCollection::new(),
+				});
+			}
 		}
 		trace!(
 			target: LOG_TARGET,
