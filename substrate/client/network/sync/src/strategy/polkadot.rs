@@ -546,7 +546,7 @@ mod test {
 			Some(WarpSyncConfig::WithProvider(Arc::new(NoopWarpSyncProvider))),
 			None,
 		)
-		unwrap();
+		.unwrap();
 
 		assert!(strategy.warp.is_some());
 		assert!(strategy.chain_sync.is_none());
