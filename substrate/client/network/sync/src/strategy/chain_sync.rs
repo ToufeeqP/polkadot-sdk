@@ -995,6 +995,17 @@ where
 		Ok(sync)
 	}
 
+	/// Set a live sync anchor without requiring the local client DB to have imported that block as
+	/// its best chain head yet. This is used by avail-light after warp sync.
+	pub fn set_live_anchor(&mut self, hash: B::Hash, number: NumberFor<B>) {
+		self.best_queued_hash = hash;
+		self.best_queued_number = number;
+		for peer in self.peers.values_mut() {
+			peer.common_number = std::cmp::min(number, peer.best_number);
+		}
+		self.allowed_requests.set_all();
+	}
+
 	/// Complete the gap sync if the target number is reached and there is a gap.
 	fn complete_gap_if_target(&mut self, number: NumberFor<B>) {
 		let gap_sync_complete = self.gap_sync.as_ref().map_or(false, |s| s.target == number);

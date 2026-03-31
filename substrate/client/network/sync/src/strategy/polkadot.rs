@@ -410,7 +410,9 @@ where
 							target: LOG_TARGET,
 							"Warp sync is complete, continuing with avail-light live sync."
 						);
-						let chain_sync = ChainSync::new(
+						let anchor_hash = res.target_header.hash();
+						let anchor_number = *res.target_header.number();
+						let mut chain_sync = ChainSync::new(
 							chain_sync_mode(self.config.mode),
 							self.client.clone(),
 							self.config.max_parallel_downloads,
@@ -424,7 +426,7 @@ where
 								},
 							),
 						)?;
-						drop(res);
+						chain_sync.set_live_anchor(anchor_hash, anchor_number);
 						self.warp = None;
 						self.chain_sync = Some(chain_sync);
 						return Ok(())
