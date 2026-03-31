@@ -355,9 +355,14 @@ where
 			config.max_blocks_per_request = MAX_BLOCKS_IN_RESPONSE as u32;
 		}
 
-		if let SyncMode::Warp = config.mode {
-			let warp_sync_config = warp_sync_config
-				.expect("Warp sync configuration must be supplied in warp sync mode.");
+		let should_start_with_warp =
+			matches!(config.mode, SyncMode::Warp) ||
+				(matches!(config.mode, SyncMode::AvailLight) && warp_sync_config.is_some());
+
+		if should_start_with_warp {
+			let warp_sync_config = warp_sync_config.expect(
+				"Warp sync configuration must be supplied when starting with warp sync.",
+			);
 			let warp_sync = WarpSync::new(
 				client.clone(),
 				warp_sync_config,
@@ -481,5 +486,79 @@ where
 		} else {
 			unreachable!("Only warp & state strategies can finish; qed")
 		}
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use super::*;
+	use crate::mock::MockBlockDownloader;
+	use sp_consensus_grandpa::{AuthorityList, SetId};
+	use substrate_test_runtime_client::{DefaultTestClientBuilderExt, TestClientBuilder};
+	use substrate_test_runtime_client::runtime::Block;
+
+	struct NoopWarpSyncProvider;
+
+	impl WarpSyncProvider<Block> for NoopWarpSyncProvider {
+		fn generate(
+			&self,
+			_start: <Block as BlockT>::Hash,
+		) -> Result<crate::strategy::warp::EncodedProof, Box<dyn std::error::Error + Send + Sync>>
+		{
+			unreachable!("constructor test should not generate warp proofs")
+		}
+
+		fn verify(
+			&self,
+			_proof: &crate::strategy::warp::EncodedProof,
+			_set_id: SetId,
+			_authorities: AuthorityList,
+		) -> Result<VerificationResult<Block>, Box<dyn std::error::Error + Send + Sync>> {
+			unreachable!("constructor test should not verify warp proofs")
+		}
+
+		fn current_authorities(&self) -> AuthorityList {
+			Default::default()
+		}
+	}
+
+	fn config(mode: SyncMode) -> PolkadotSyncingStrategyConfig<Block> {
+		let mut downloader = MockBlockDownloader::<Block>::new();
+		downloader.expect_protocol_name().return_const(ProtocolName::Static(""));
+
+		PolkadotSyncingStrategyConfig {
+			mode,
+			max_parallel_downloads: 1,
+			max_blocks_per_request: 8,
+			min_peers_to_start_warp_sync: Some(1),
+			metrics_registry: None,
+			state_request_protocol_name: ProtocolName::Static(""),
+			block_downloader: Arc::new(downloader),
+		}
+	}
+
+	#[test]
+	fn avail_light_prefers_warp_bootstrap_when_available() {
+		let client = Arc::new(TestClientBuilder::new().build());
+		let strategy = PolkadotSyncingStrategy::new(
+			config(SyncMode::AvailLight),
+			client,
+			Some(WarpSyncConfig::WithProvider(Arc::new(NoopWarpSyncProvider))),
+			None,
+		)
+		unwrap();
+
+		assert!(strategy.warp.is_some());
+		assert!(strategy.chain_sync.is_none());
+	}
+
+	#[test]
+	fn avail_light_falls_back_to_chain_sync_without_warp_provider() {
+		let client = Arc::new(TestClientBuilder::new().build());
+		let strategy =
+			PolkadotSyncingStrategy::new(config(SyncMode::AvailLight), client, None, None).unwrap();
+
+		assert!(strategy.warp.is_none());
+		assert!(strategy.chain_sync.is_some());
 	}
 }
