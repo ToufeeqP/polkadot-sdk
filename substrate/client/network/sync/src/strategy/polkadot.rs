@@ -338,10 +338,14 @@ where
 
 	fn is_major_syncing(&self) -> bool {
 		self.warp.is_some() ||
+			self.pending_bootstrap_block.is_some() ||
+			self.pending_bootstrap_hash.is_some() ||
 			self.state.is_some() ||
 			match self.chain_sync {
 				Some(ref s) => s.status().state.is_major_syncing(),
-				None => unreachable!("At least one syncing strategy is active; qed"),
+				// `AvailLight` can have a short handoff window after warp sync where the
+				// verified target block is being imported before `ChainSync` is created.
+				None => false,
 			}
 	}
 
@@ -354,6 +358,37 @@ where
 		// once we have parallel strategies.
 		if let Some(ref warp) = self.warp {
 			warp.status()
+		} else if let Some(ref block) = self.pending_bootstrap_block {
+			let target = block
+				.header
+				.as_ref()
+				.map(|header| *header.number())
+				.unwrap_or_default();
+			SyncStatus {
+				state: crate::types::SyncState::Importing { target },
+				best_seen_block: Some(target),
+				num_peers: self.peer_best_blocks.len() as u32,
+				num_connected_peers: 0,
+				queued_blocks: 1,
+				state_sync: None,
+				warp_sync: None,
+			}
+		} else if let Some(hash) = self.pending_bootstrap_hash {
+			let target = self
+				.client
+				.number(hash)
+				.ok()
+				.flatten()
+				.unwrap_or_default();
+			SyncStatus {
+				state: crate::types::SyncState::Importing { target },
+				best_seen_block: Some(target),
+				num_peers: self.peer_best_blocks.len() as u32,
+				num_connected_peers: 0,
+				queued_blocks: 1,
+				state_sync: None,
+				warp_sync: None,
+			}
 		} else if let Some(ref state) = self.state {
 			state.status()
 		} else if let Some(ref chain_sync) = self.chain_sync {
